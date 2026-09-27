@@ -1,0 +1,17 @@
+# arr-control .gitignore
+.env
+*.db
+*.db-journal
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/

@@ -1,0 +1,43 @@
+services:
+  arr-control:
+    build: .
+    image: arr-control:latest
+    container_name: arr-control
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "5173:5173"
+    environment:
+      - GUARDARR_DATA_DIR=/config
+      - DATABASE_URL=sqlite:////config/arr-control.db
+      - TZ=UTC
+      # Sonarr
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - SONARR_TIMEOUT_SECONDS=10
+      - SONARR_VERIFY_TLS=false
+      # Radarr
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - RADARR_TIMEOUT_SECONDS=10
+      - RADARR_VERIFY_TLS=false
+      # qBittorrent
+      - QBITTORRENT_URL=http://qbittorrent:8080
+      - QBITTORRENT_USERNAME=${QBITTORRENT_USERNAME:-admin}
+      - QBITTORRENT_PASSWORD=${QBITTORRENT_PASSWORD}
+      - QBITTORRENT_TIMEOUT_SECONDS=10
+      - QBITTORRENT_VERIFY_TLS=false
+      # Polling
+      - POLL_INTERVAL_SECONDS=30
+      - POLL_TIMEOUT_SECONDS=10
+    volumes:
+      - arr-control-config:/config
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  arr-control-config:
