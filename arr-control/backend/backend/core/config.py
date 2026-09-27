@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     qbittorrent_timeout_seconds: int = Field(default=10)
     qbittorrent_verify_tls: bool = Field(default=True)
 
+    # Prowlarr Configuration
+    prowlarr_url: str = Field(default="http://localhost:9696")
+    prowlarr_api_key: str = Field(default="")
+    prowlarr_timeout_seconds: int = Field(default=10)
+    prowlarr_verify_tls: bool = Field(default=True)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

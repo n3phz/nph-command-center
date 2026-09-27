@@ -10,6 +10,7 @@ class SourceService(str, Enum):
     SONARR = "sonarr"
     RADARR = "radarr"
     QBITTORRENT = "qbittorrent"
+    PROWLARR = "prowlarr"
 
 
 class MediaType(str, Enum):
@@ -33,6 +34,18 @@ class EventType(str, Enum):
     AVAILABLE = "available"
     STUCK = "stuck"
     UNKNOWN = "unknown"
+    
+    # Webhook-specific events
+    WEBHOOK_TEST = "webhook_test"
+    APPLICATION_UPDATE = "application_update"
+    HEALTH_ISSUE = "health_issue"
+    HEALTH_RESTORED = "health_restored"
+    
+    # Prowlarr-specific events
+    INDEXER_SEARCH = "indexer_search"
+    INDEXER_SEARCH_COMPLETED = "indexer_search_completed"
+    INDEXER_SEARCH_FAILED = "indexer_search_failed"
+    RELEASE_REJECTED = "release_rejected"
 
 
 class EventStatus(str, Enum):

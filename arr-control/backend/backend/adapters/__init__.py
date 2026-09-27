@@ -3,6 +3,7 @@ from backend.adapters.base import ServiceAdapter, SourceService
 from backend.adapters.sonarr import SonarrAdapter
 from backend.adapters.radarr import RadarrAdapter
 from backend.adapters.qbittorrent import QBittorrentAdapter
+from backend.adapters.prowlarr import ProwlarrAdapter
 
 
 def get_adapter(service: SourceService) -> ServiceAdapter:
@@ -11,6 +12,7 @@ def get_adapter(service: SourceService) -> ServiceAdapter:
         SourceService.SONARR: SonarrAdapter,
         SourceService.RADARR: RadarrAdapter,
         SourceService.QBITTORRENT: QBittorrentAdapter,
+        SourceService.PROWLARR: ProwlarrAdapter,
     }
     
     adapter_class = adapters.get(service)
@@ -26,4 +28,5 @@ def get_all_adapters() -> list[ServiceAdapter]:
         get_adapter(SourceService.SONARR),
         get_adapter(SourceService.RADARR),
         get_adapter(SourceService.QBITTORRENT),
+        get_adapter(SourceService.PROWLARR),
     ]

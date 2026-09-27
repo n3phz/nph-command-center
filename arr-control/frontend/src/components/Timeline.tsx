@@ -5,6 +5,7 @@ interface TimelineProps {
     event_type: string;
     error_message?: string;
     normalized_metadata?: Record<string, any>;
+    ingestion?: 'webhook' | 'polling';
   }>;
 }
 
@@ -32,6 +33,14 @@ export const Timeline: React.FC<TimelineProps> = ({ events }) => {
       import_failed: '✗',
       available: '✓',
       stuck: '⏸',
+      webhook_test: 'T',
+      application_update: 'U',
+      health_issue: '⚠',
+      health_restored: '✓',
+      indexer_search: '🔍',
+      indexer_search_completed: '✓',
+      indexer_search_failed: '✗',
+      release_rejected: '⊘',
     };
     return icons[eventType] || '•';
   };
@@ -50,8 +59,36 @@ export const Timeline: React.FC<TimelineProps> = ({ events }) => {
       import_failed: '#e17055',
       available: '#6c5ce7',
       stuck: '#636e72',
+      webhook_test: '#74b9ff',
+      application_update: '#a29bfe',
+      health_issue: '#d63031',
+      health_restored: '#00b894',
+      indexer_search: '#55efc4',
+      indexer_search_completed: '#00b894',
+      indexer_search_failed: '#d63031',
+      release_rejected: '#fd79a8',
     };
     return colors[eventType] || '#00d4ff';
+  };
+
+  const getIngestionBadge = (ingestion?: 'webhook' | 'polling') => {
+    if (!ingestion) return null;
+    return (
+      <span
+        style={{
+          marginLeft: '0.5rem',
+          padding: '0.125rem 0.375rem',
+          borderRadius: '0.25rem',
+          fontSize: '0.65rem',
+          fontWeight: 'bold',
+          background: ingestion === 'webhook' ? '#00b894' : '#74b9ff',
+          color: '#fff',
+          textTransform: 'uppercase',
+        }}
+      >
+        {ingestion}
+      </span>
+    );
   };
 
   return (
@@ -70,7 +107,10 @@ export const Timeline: React.FC<TimelineProps> = ({ events }) => {
               {getEventIcon(event.event_type)}
             </div>
             <div className="timeline-content">
-              <div className="event-type">{event.event_type.replace(/_/g, ' ')}</div>
+              <div className="event-type">
+                {event.event_type.replace(/_/g, ' ')}
+                {getIngestionBadge(event.ingestion)}
+              </div>
               <div className="event-source">{event.source}</div>
               {event.error_message && (
                 <div className="error-message">{event.error_message}</div>

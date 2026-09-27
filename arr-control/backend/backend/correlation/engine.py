@@ -108,6 +108,14 @@ class CorrelationResult:
             # Determine final state
             final_state = events[-1].event_type
             
+            # Track ingestion sources
+            ingestion_sources = set()
+            for e in events:
+                if e.normalized_metadata and e.normalized_metadata.get("ingestion"):
+                    ingestion_sources.add(e.normalized_metadata["ingestion"])
+                else:
+                    ingestion_sources.add("polling")
+            
             attempts.append({
                 "hash": hash_key,
                 "first_event": events[0].timestamp.isoformat(),
@@ -118,6 +126,7 @@ class CorrelationResult:
                 "tags": events[0].normalized_metadata.get("tags", "") if events[0].normalized_metadata else "",
                 "is_cross_seed": is_cross_seed,
                 "event_count": len(events),
+                "ingestion_sources": list(ingestion_sources),
             })
         
         return attempts

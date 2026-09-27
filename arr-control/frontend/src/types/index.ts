@@ -16,6 +16,7 @@ export interface MediaItem {
   first_seen_at?: string;
   confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
   download_attempts?: DownloadAttempt[];
+  ingestion_sources?: ('webhook' | 'polling')[];
 }
 
 export interface DownloadAttempt {
@@ -28,6 +29,7 @@ export interface DownloadAttempt {
   tags: string;
   is_cross_seed: boolean;
   event_count: number;
+  ingestion_sources?: ('webhook' | 'polling')[];
 }
 
 export interface OrphanTorrent {
@@ -39,6 +41,22 @@ export interface OrphanTorrent {
   progress: number;
   save_path: string;
   reason: string;
+}
+
+export interface Indexer {
+  id: number;
+  name: string;
+  enabled: boolean;
+  status: string;
+  last_response?: string;
+  recent_errors?: string;
+}
+
+export interface SearchEvent {
+  query: string;
+  indexer: string;
+  results: number;
+  timestamp: string;
 }
 
 export interface Event {
@@ -53,6 +71,7 @@ export interface Event {
   correlation_key: string;
   status: string;
   error_message?: string;
+  ingestion?: 'webhook' | 'polling';
 }
 
 export interface ServiceStatus {
@@ -69,6 +88,7 @@ export interface TimelineEvent {
   status: string;
   error_message?: string;
   normalized_metadata?: Record<string, any>;
+  ingestion?: 'webhook' | 'polling';
 }
 
 export interface ItemDetail extends MediaItem {
