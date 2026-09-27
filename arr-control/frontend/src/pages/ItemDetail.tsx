@@ -4,6 +4,7 @@ import { api } from './services/api';
 import { ItemDetail, Explanation } from './types';
 import Timeline from './components/Timeline';
 import ExplanationCard from './components/ExplanationCard';
+import DownloadAttempt from './components/DownloadAttempt';
 
 function ItemDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -80,6 +81,21 @@ function ItemDetailPage() {
         <span className={`state-badge ${item.current_state.replace(/_/g, '_').toLowerCase()}`}>
           {item.current_state.replace(/_/g, ' ')}
         </span>
+        {item.confidence && (
+          <span
+            style={{
+              marginLeft: '1rem',
+              padding: '0.125rem 0.5rem',
+              borderRadius: '0.25rem',
+              fontSize: '0.75rem',
+              fontWeight: 'bold',
+              background: item.confidence === 'HIGH' ? '#00b894' : item.confidence === 'MEDIUM' ? '#fdcb6e' : '#d63031',
+              color: '#fff',
+            }}
+          >
+            {item.confidence}
+          </span>
+        )}
         {item.progress !== undefined && (
           <div style={{ marginTop: '1rem' }}>
             <div className="progress-bar" style={{ height: '8px' }}>
@@ -102,7 +118,16 @@ function ItemDetailPage() {
         )}
       </div>
 
-      {explanation && <ExplanationCard reason={explanation.reason} evidence={explanation.evidence} />}
+      {explanation && <ExplanationCard reason={explanation.reason} evidence={explanation.evidence} confidence={item.confidence} />}
+
+      {item.download_attempts && item.download_attempts.length > 0 && (
+        <div style={{ marginTop: '1.5rem' }}>
+          <h3>Download Attempts</h3>
+          {item.download_attempts.map((attempt, index) => (
+            <DownloadAttempt key={index} attempt={attempt} />
+          ))}
+        </div>
+      )}
 
       <Timeline events={item.timeline} />
     </div>

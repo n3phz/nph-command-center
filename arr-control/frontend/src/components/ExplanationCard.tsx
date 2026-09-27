@@ -1,12 +1,35 @@
 interface ExplanationProps {
   reason: string;
   evidence: string[];
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
-export const ExplanationCard: React.FC<ExplanationProps> = ({ reason, evidence }) => {
+export const ExplanationCard: React.FC<ExplanationProps> = ({ reason, evidence, confidence }) => {
+  const confidenceColors: Record<string, string> = {
+    HIGH: '#00b894',
+    MEDIUM: '#fdcb6e',
+    LOW: '#d63031',
+  };
+
   return (
     <div className="detail-explanation">
-      <h3>WHY?</h3>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+        <h3 style={{ margin: 0 }}>WHY?</h3>
+        {confidence && (
+          <span
+            style={{
+              padding: '0.125rem 0.5rem',
+              borderRadius: '0.25rem',
+              fontSize: '0.75rem',
+              fontWeight: 'bold',
+              background: confidenceColors[confidence],
+              color: '#fff',
+            }}
+          >
+            {confidence}
+          </span>
+        )}
+      </div>
       <p>{reason}</p>
       {evidence.length > 0 && (
         <ul style={{ marginTop: '1rem', paddingLeft: '1.5rem', fontSize: '0.875rem', color: '#888' }}>

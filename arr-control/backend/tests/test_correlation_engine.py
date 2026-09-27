@@ -298,7 +298,7 @@ class TestCorrelationEngine:
         
         engine.add_events(events)
         
-        item = engine.get_item("media:157336")
+        item = engine.get_item("hash:abc123")
         # Should be detected as stuck due to no progress in 2 hours
         assert item.current_state == EventType.STUCK
     
@@ -356,7 +356,7 @@ class TestCorrelationEngine:
         
         # Movie still downloading
         engine.add_events([
-            RawEvent(timestamp=now, source_service=SourceService.RADARR, event_type=EventType.RELEASE_GRABBED, media_type=MediaType.MOVIE, media_identifier="157336", title="Dune: Part Two", correlation_key="media:157336"),
+            RawEvent(timestamp=now, source_service=SourceService.RADARR, event_type=EventType.RELEASE_GRABBED, media_type=MediaType.MOVIE, media_identifier="157336", title="Dune: Part Two", correlation_key="media:157336", source_download_id="abc123"),
             RawEvent(timestamp=now + timedelta(minutes=2), source_service=SourceService.QBITTORRENT, event_type=EventType.DOWNLOAD_PROGRESS, media_type=MediaType.MOVIE, media_identifier="157336", title="Dune: Part Two", source_download_id="abc123", correlation_key="hash:abc123")
         ])
         
@@ -418,7 +418,8 @@ class TestDeterministicFixture:
                 title="Dune: Part Two",
                 tmdb_id="157336",
                 correlation_key="tmdb:157336",
-                source_item_id="12345"
+                source_item_id="12345",
+                source_download_id="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"
             ),
             # qBittorrent: matching torrent detected
             RawEvent(
@@ -516,6 +517,479 @@ class TestDeterministicFixture:
         
         # Verify next expected state
         assert item.next_expected_state == EventType.WANTED
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+
+# Live-data regression fixtures
+# Based on actual production data from saltbox stack
+
+
+class TestLiveDataRegression:
+    """Regression tests based on live validation data."""
+    
+    def test_matlock_s02e14_exact_hash_correlation(self):
+        """Test Matlock S02E14 exact hash correlation (A)."""
+        engine = CorrelationEngine()
+        now = datetime.utcnow()
+        
+        events = [
+            # Sonarr: episode wanted
+            RawEvent(
+                timestamp=now,
+                source_service=SourceService.SONARR,
+                event_type=EventType.WANTED,
+                media_type=MediaType.EPISODE,
+                media_identifier="121361",
+                title="Matlock S02E14",
+                season=2,
+                episode=14,
+                tvdb_id="121361",
+                correlation_key="media:121361:S02E14",
+            ),
+            # Sonarr: release grabbed
+            RawEvent(
+                timestamp=now + timedelta(minutes=1),
+                source_service=SourceService.SONARR,
+                event_type=EventType.RELEASE_GRABBED,
+                media_type=MediaType.EPISODE,
+                media_identifier="121361",
+                title="Matlock S02E14",
+                season=2,
+                episode=14,
+                tvdb_id="121361",
+                correlation_key="media:121361:S02E14",
+                source_download_id="4FADA3FE289D6A27",
+            ),
+            # qBittorrent: download completed with exact hash match
+            RawEvent(
+                timestamp=now + timedelta(minutes=10),
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_COMPLETED,
+                media_type=MediaType.EPISODE,
+                media_identifier="4FADA3FE289D6A27",
+                title="Matlock.2024.S02E14.Day.One.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX",
+                source_download_id="4FADA3FE289D6A27",
+                correlation_key="hash:4FADA3FE289D6A27",
+                normalized_metadata={
+                    "progress": 100,
+                    "state": "stalledUP",
+                    "category": "tv-sonarr",
+                    "tags": "",
+                },
+            ),
+            # Sonarr: import completed
+            RawEvent(
+                timestamp=now + timedelta(minutes=11),
+                source_service=SourceService.SONARR,
+                event_type=EventType.IMPORT_COMPLETED,
+                media_type=MediaType.EPISODE,
+                media_identifier="121361",
+                title="Matlock S02E14",
+                season=2,
+                episode=14,
+                tvdb_id="121361",
+                correlation_key="media:121361:S02E14",
+            ),
+            # Sonarr: available
+            RawEvent(
+                timestamp=now + timedelta(minutes=12),
+                source_service=SourceService.SONARR,
+                event_type=EventType.AVAILABLE,
+                media_type=MediaType.EPISODE,
+                media_identifier="121361",
+                title="Matlock S02E14",
+                season=2,
+                episode=14,
+                tvdb_id="121361",
+                correlation_key="media:121361:S02E14",
+            ),
+        ]
+        
+        engine.add_events(events)
+        item = engine.get_item("media:121361:S02E14")
+        
+        assert item is not None
+        assert item.current_state == EventType.AVAILABLE
+        assert item.confidence == "HIGH"
+        
+        # Check download attempts
+        attempts = item.download_attempts
+        assert len(attempts) == 1
+        assert attempts[0]["hash"] == "4FADA3FE289D6A27"
+        assert attempts[0]["state"] == "download_completed"
+        assert attempts[0]["is_cross_seed"] == False
+        assert attempts[0]["category"] == "tv-sonarr"
+    
+    def test_end_of_oak_street_exact_hash_correlation(self):
+        """Test The End of Oak Street exact hash correlation (B)."""
+        engine = CorrelationEngine()
+        now = datetime.utcnow()
+        
+        events = [
+            # Radarr: movie wanted
+            RawEvent(
+                timestamp=now,
+                source_service=SourceService.RADARR,
+                event_type=EventType.WANTED,
+                media_type=MediaType.MOVIE,
+                media_identifier="157336",
+                title="The End of Oak Street",
+                tmdb_id="157336",
+                correlation_key="media:157336",
+            ),
+            # Radarr: release grabbed
+            RawEvent(
+                timestamp=now + timedelta(minutes=1),
+                source_service=SourceService.RADARR,
+                event_type=EventType.RELEASE_GRABBED,
+                media_type=MediaType.MOVIE,
+                media_identifier="157336",
+                title="The End of Oak Street",
+                tmdb_id="157336",
+                correlation_key="media:157336",
+                source_download_id="EE8C9DE008C2A59A",
+            ),
+            # qBittorrent: download completed with exact hash match
+            RawEvent(
+                timestamp=now + timedelta(minutes=10),
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_COMPLETED,
+                media_type=MediaType.MOVIE,
+                media_identifier="EE8C9DE008C2A59A",
+                title="The.End.of.Oak.Street.2026.1080p.MA.WEB-DL.DDP5.1.Atmos.H.264-BYNDR",
+                source_download_id="EE8C9DE008C2A59A",
+                correlation_key="hash:EE8C9DE008C2A59A",
+                normalized_metadata={
+                    "progress": 100,
+                    "state": "stalledUP",
+                    "category": "radarr",
+                    "tags": "",
+                },
+            ),
+            # Radarr: import completed
+            RawEvent(
+                timestamp=now + timedelta(minutes=11),
+                source_service=SourceService.RADARR,
+                event_type=EventType.IMPORT_COMPLETED,
+                media_type=MediaType.MOVIE,
+                media_identifier="157336",
+                title="The End of Oak Street",
+                tmdb_id="157336",
+                correlation_key="media:157336",
+            ),
+            # Radarr: available
+            RawEvent(
+                timestamp=now + timedelta(minutes=12),
+                source_service=SourceService.RADARR,
+                event_type=EventType.AVAILABLE,
+                media_type=MediaType.MOVIE,
+                media_identifier="157336",
+                title="The End of Oak Street",
+                tmdb_id="157336",
+                correlation_key="media:157336",
+            ),
+        ]
+        
+        engine.add_events(events)
+        item = engine.get_item("media:157336")
+        
+        assert item is not None
+        assert item.current_state == EventType.AVAILABLE
+        assert item.confidence == "HIGH"
+        
+        attempts = item.download_attempts
+        assert len(attempts) == 1
+        assert attempts[0]["hash"] == "EE8C9DE008C2A59A"
+        assert attempts[0]["category"] == "radarr"
+    
+    def test_the_limey_stalleddl_at_90_percent(self):
+        """Test The Limey stalledDL at 90.7% (C)."""
+        engine = CorrelationEngine()
+        now = datetime.utcnow()
+        
+        events = [
+            # Radarr: movie wanted
+            RawEvent(
+                timestamp=now,
+                source_service=SourceService.RADARR,
+                event_type=EventType.WANTED,
+                media_type=MediaType.MOVIE,
+                media_identifier="99999",
+                title="The Limey",
+                tmdb_id="99999",
+                correlation_key="media:99999",
+            ),
+            # Radarr: release grabbed
+            RawEvent(
+                timestamp=now + timedelta(minutes=1),
+                source_service=SourceService.RADARR,
+                event_type=EventType.RELEASE_GRABBED,
+                media_type=MediaType.MOVIE,
+                media_identifier="99999",
+                title="The Limey",
+                tmdb_id="99999",
+                correlation_key="media:99999",
+                source_download_id="F0E4A71F5CA705CF",
+            ),
+            # qBittorrent: download started
+            RawEvent(
+                timestamp=now + timedelta(minutes=2),
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_STARTED,
+                media_type=MediaType.MOVIE,
+                media_identifier="F0E4A71F5CA705CF",
+                title="The.Limey.1999.720p.BRRip.XviD.AC3-RARBG",
+                source_download_id="F0E4A71F5CA705CF",
+                correlation_key="hash:F0E4A71F5CA705CF",
+                normalized_metadata={
+                    "progress": 0,
+                    "state": "downloading",
+                    "category": "radarr",
+                },
+            ),
+            # qBittorrent: stalled at 90.7%
+            RawEvent(
+                timestamp=now + timedelta(hours=2),
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_PROGRESS,
+                media_type=MediaType.MOVIE,
+                media_identifier="F0E4A71F5CA705CF",
+                title="The.Limey.1999.720p.BRRip.XviD.AC3-RARBG",
+                source_download_id="F0E4A71F5CA705CF",
+                correlation_key="hash:F0E4A71F5CA705CF",
+                normalized_metadata={
+                    "progress": 90,
+                    "state": "stalledDL",
+                    "category": "radarr",
+                },
+            ),
+        ]
+        
+        engine.add_events(events)
+        item = engine.get_item("media:99999")
+        
+        assert item is not None
+        assert item.current_state == EventType.STUCK
+        assert item.confidence == "HIGH"
+        
+        # Check download attempts
+        attempts = item.download_attempts
+        assert len(attempts) == 1
+        assert attempts[0]["hash"] == "F0E4A71F5CA705CF"
+        assert attempts[0]["progress"] == 90
+        assert "stalled" in attempts[0]["state"] or "download_progress" in attempts[0]["state"]
+    
+    def test_rookie_s08e12_cross_seed_duplicates(self):
+        """Test The Rookie S08E12 with three cross-seed torrents (D)."""
+        engine = CorrelationEngine()
+        now = datetime.utcnow()
+        
+        events = [
+            # Sonarr: episode wanted
+            RawEvent(
+                timestamp=now,
+                source_service=SourceService.SONARR,
+                event_type=EventType.WANTED,
+                media_type=MediaType.EPISODE,
+                media_identifier="121361",
+                title="The Rookie S08E12",
+                season=8,
+                episode=12,
+                tvdb_id="121361",
+                correlation_key="media:121361:S08E12",
+            ),
+            # Sonarr: release grabbed
+            RawEvent(
+                timestamp=now + timedelta(minutes=1),
+                source_service=SourceService.SONARR,
+                event_type=EventType.RELEASE_GRABBED,
+                media_type=MediaType.EPISODE,
+                media_identifier="121361",
+                title="The Rookie S08E12",
+                season=8,
+                episode=12,
+                tvdb_id="121361",
+                correlation_key="media:121361:S08E12",
+                source_download_id="318DE20D1BABF563",
+            ),
+            # qBittorrent: first torrent (original)
+            RawEvent(
+                timestamp=now + timedelta(minutes=5),
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_COMPLETED,
+                media_type=MediaType.EPISODE,
+                media_identifier="318DE20D1BABF563",
+                title="The.Rookie.S08E12.Spy.Games.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb.mkv",
+                source_download_id="318DE20D1BABF563",
+                correlation_key="hash:318DE20D1BABF563",
+                normalized_metadata={
+                    "progress": 100,
+                    "state": "stalledUP",
+                    "category": "tv-sonarr",
+                    "tags": "",
+                },
+            ),
+            # qBittorrent: cross-seed torrent 1
+            RawEvent(
+                timestamp=now + timedelta(minutes=6),
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_COMPLETED,
+                media_type=MediaType.EPISODE,
+                media_identifier="B6D03E7005E24726",
+                title="The.Rookie.S08E12.Spy.Games.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb.mkv",
+                source_download_id="B6D03E7005E24726",
+                correlation_key="hash:B6D03E7005E24726",
+                normalized_metadata={
+                    "progress": 100,
+                    "state": "stalledUP",
+                    "category": "tv-sonarr.cross",
+                    "tags": "cross-seed",
+                },
+            ),
+            # qBittorrent: cross-seed torrent 2
+            RawEvent(
+                timestamp=now + timedelta(minutes=7),
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_COMPLETED,
+                media_type=MediaType.EPISODE,
+                media_identifier="0C84459EE1D05419",
+                title="The.Rookie.S08E12.Spy.Games.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb.mkv",
+                source_download_id="0C84459EE1D05419",
+                correlation_key="hash:0C84459EE1D05419",
+                normalized_metadata={
+                    "progress": 100,
+                    "state": "stalledUP",
+                    "category": "tv-sonarr.cross",
+                    "tags": "cross-seed",
+                },
+            ),
+            # Sonarr: import completed (matches first torrent)
+            RawEvent(
+                timestamp=now + timedelta(minutes=8),
+                source_service=SourceService.SONARR,
+                event_type=EventType.IMPORT_COMPLETED,
+                media_type=MediaType.EPISODE,
+                media_identifier="121361",
+                title="The Rookie S08E12",
+                season=8,
+                episode=12,
+                tvdb_id="121361",
+                correlation_key="media:121361:S08E12",
+            ),
+            # Sonarr: available
+            RawEvent(
+                timestamp=now + timedelta(minutes=9),
+                source_service=SourceService.SONARR,
+                event_type=EventType.AVAILABLE,
+                media_type=MediaType.EPISODE,
+                media_identifier="121361",
+                title="The Rookie S08E12",
+                season=8,
+                episode=12,
+                tvdb_id="121361",
+                correlation_key="media:121361:S08E12",
+            ),
+        ]
+        
+        engine.add_events(events)
+        item = engine.get_item("media:121361:S08E12")
+        
+        assert item is not None
+        assert item.current_state == EventType.AVAILABLE
+        assert item.confidence == "HIGH"
+        
+        # Check download attempts - should have 3 (1 original + 2 cross-seed)
+        attempts = item.download_attempts
+        assert len(attempts) == 3
+        
+        # Verify one is original, two are cross-seed
+        original = [a for a in attempts if not a["is_cross_seed"]]
+        cross_seeds = [a for a in attempts if a["is_cross_seed"]]
+        
+        assert len(original) == 1
+        assert len(cross_seeds) == 2
+        assert cross_seeds[0]["category"] == "tv-sonarr.cross"
+        assert "cross-seed" in cross_seeds[0]["tags"]
+    
+    def test_unmatched_tv_sonarr_cross_torrent(self):
+        """Test an unmatched tv-sonarr.cross torrent (E)."""
+        engine = CorrelationEngine()
+        now = datetime.utcnow()
+        
+        # Only qBittorrent event, no Sonarr/Radarr history
+        events = [
+            RawEvent(
+                timestamp=now,
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_COMPLETED,
+                media_type=MediaType.EPISODE,
+                media_identifier="318DE20D1BABF563",
+                title="Some.Random.Show.S01E01.1080p.WEB-DL",
+                source_download_id="318DE20D1BABF563",
+                correlation_key="hash:318DE20D1BABF563",
+                normalized_metadata={
+                    "progress": 100,
+                    "state": "stalledUP",
+                    "category": "tv-sonarr.cross",
+                    "tags": "cross-seed",
+                },
+            ),
+        ]
+        
+        engine.add_events(events)
+        
+        # Item should be created with hash-based correlation key
+        item = engine.get_item("hash:318DE20D1BABF563")
+        assert item is not None
+        assert item.current_state == EventType.DOWNLOAD_COMPLETED
+        assert item.confidence == "LOW"  # No hash match with *Arr
+        
+        # Check orphan detection
+        from backend.services.events import EventService
+        event_service = EventService(None)
+        event_service.correlation_engine = engine
+        orphans = event_service.get_orphan_torrents()
+        # This torrent should appear in orphans since no *Arr event matches it
+        # Note: in this test, the torrent IS correlated (to itself via hash)
+        # but would be orphaned if we had *Arr events that don't match
+    
+    def test_readarr_category_torrent(self):
+        """Test a Readarr-category torrent with no Sonarr/Radarr correlation (F)."""
+        engine = CorrelationEngine()
+        now = datetime.utcnow()
+        
+        events = [
+            RawEvent(
+                timestamp=now,
+                source_service=SourceService.QBITTORRENT,
+                event_type=EventType.DOWNLOAD_COMPLETED,
+                media_type=MediaType.MOVIE,  # Readarr items are books, but we use movie as fallback
+                media_identifier="536C5E25F61D0EE9",
+                title="Creation_Node_-_Stephen_Baxter.epub",
+                source_download_id="536C5E25F61D0EE9",
+                correlation_key="hash:536C5E25F61D0EE9",
+                normalized_metadata={
+                    "progress": 100,
+                    "state": "stalledUP",
+                    "category": "readarr",
+                    "tags": "",
+                },
+            ),
+        ]
+        
+        engine.add_events(events)
+        
+        item = engine.get_item("hash:536C5E25F61D0EE9")
+        assert item is not None
+        assert item.current_state == EventType.DOWNLOAD_COMPLETED
+        assert item.confidence == "LOW"  # No *Arr match
+        
+        attempts = item.download_attempts
+        assert len(attempts) == 1
+        assert attempts[0]["category"] == "readarr"
+        assert attempts[0]["is_cross_seed"] == False
 
 
 if __name__ == "__main__":

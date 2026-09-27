@@ -2,7 +2,7 @@
 from typing import Dict, Set, Optional
 from enum import Enum
 
-from backend.adapters.base import EventType
+from backend.adapters.base import EventType, SourceService
 
 
 class StateMachine:
@@ -79,6 +79,15 @@ class StateMachine:
         
         last_event = events[-1]
         state = last_event.event_type
+        
+        # Check for qBittorrent stalled states
+        # These are explicit signals from qBittorrent that a torrent is stalled
+        for event in reversed(events):
+            if event.source_service == SourceService.QBITTORRENT:
+                qbit_state = event.normalized_metadata.get("state", "").lower() if event.normalized_metadata else ""
+                if qbit_state in ["stalleddl", "stallledup"]:
+                    progress = event.normalized_metadata.get("progress", 0)
+                    return EventType.STUCK, f"qBittorrent reports stalled ({qbit_state}) at {progress}%"
         
         # Check for stuck condition: no progress for a long time
         if len(events) > 1:

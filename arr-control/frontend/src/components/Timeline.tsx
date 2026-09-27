@@ -4,6 +4,7 @@ interface TimelineProps {
     source: string;
     event_type: string;
     error_message?: string;
+    normalized_metadata?: Record<string, any>;
   }>;
 }
 
@@ -73,6 +74,14 @@ export const Timeline: React.FC<TimelineProps> = ({ events }) => {
               <div className="event-source">{event.source}</div>
               {event.error_message && (
                 <div className="error-message">{event.error_message}</div>
+              )}
+              {event.normalized_metadata && (
+                <details style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
+                  <summary style={{ color: '#888', cursor: 'pointer' }}>Metadata</summary>
+                  <pre style={{ marginTop: '0.25rem', whiteSpace: 'pre-wrap' }}>
+                    {JSON.stringify(event.normalized_metadata, null, 2)}
+                  </pre>
+                </details>
               )}
             </div>
           </div>

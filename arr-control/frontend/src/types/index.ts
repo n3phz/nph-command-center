@@ -14,6 +14,31 @@ export interface MediaItem {
   next_expected_state?: string;
   event_count: number;
   first_seen_at?: string;
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  download_attempts?: DownloadAttempt[];
+}
+
+export interface DownloadAttempt {
+  hash: string;
+  first_event: string;
+  last_event: string;
+  state: string;
+  progress: number;
+  category: string;
+  tags: string;
+  is_cross_seed: boolean;
+  event_count: number;
+}
+
+export interface OrphanTorrent {
+  hash: string;
+  title: string;
+  category: string;
+  tags: string;
+  state: string;
+  progress: number;
+  save_path: string;
+  reason: string;
 }
 
 export interface Event {

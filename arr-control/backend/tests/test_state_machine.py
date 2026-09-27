@@ -1,6 +1,6 @@
 """Tests for state machine."""
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.adapters.base import SourceService, MediaType, EventType, EventStatus, RawEvent
 from backend.correlation.state_machine import StateMachine
@@ -47,7 +47,7 @@ class TestStateMachine:
                 correlation_key="tmdb:157336"
             ),
             RawEvent(
-                timestamp=now.replace(hour=now.hour + 2),  # 2 hours later
+                timestamp=now + timedelta(hours=2),
                 source_service=SourceService.QBITTORRENT,
                 event_type=EventType.DOWNLOAD_PROGRESS,
                 media_type=MediaType.MOVIE,

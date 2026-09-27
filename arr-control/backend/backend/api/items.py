@@ -103,3 +103,11 @@ def get_item_explanation(item_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="No explanation found for item")
     
     return explanation
+
+
+@router.get("/orphans", response_model=List[dict], summary="Get unmatched/orphan torrents")
+def get_orphan_torrents(db: Session = Depends(get_db)):
+    """Get qBittorrent torrents that could not be correlated to any media item."""
+    event_service = EventService(db)
+    orphans = event_service.get_orphan_torrents()
+    return orphans

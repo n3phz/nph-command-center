@@ -1,7 +1,7 @@
 """Event service for processing and storing events."""
 import json
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
@@ -122,6 +122,51 @@ class EventService:
         return len(events)
     
     def get_items(self) -> List[CorrelationResult]:
+        """Get all correlated media items."""
+        return self.correlation_engine.get_all_items()
+    
+    def get_orphan_torrents(self) -> List[Dict[str, Any]]:
+        """Get qBittorrent torrents that could not be correlated to any media item."""
+        items = self.correlation_engine.get_all_items()
+        
+        # Collect all hashes that were successfully correlated
+        correlated_hashes = set()
+        for item in items:
+            for attempt in getattr(item, 'download_attempts', []):
+                correlated_hashes.add(attempt.get('hash', '').upper())
+        
+        # Get all qBittorrent events from the engine
+        all_events = []
+        for item in items:
+            all_events.extend(item.events)
+        
+        # Find qBittorrent events with hashes not in correlated_hashes
+        orphan_events = []
+        for event in all_events:
+            if event.source_service == SourceService.QBITTORRENT and event.source_download_id:
+                hash_key = event.source_download_id.upper()
+                if hash_key not in correlated_hashes:
+                    orphan_events.append(event)
+        
+        # Group by hash
+        orphans = {}
+        for event in orphan_events:
+            hash_key = event.source_download_id.upper()
+            if hash_key not in orphans:
+                orphans[hash_key] = {
+                    "hash": hash_key,
+                    "title": event.title,
+                    "category": event.normalized_metadata.get("category", "") if event.normalized_metadata else "",
+                    "tags": event.normalized_metadata.get("tags", "") if event.normalized_metadata else "",
+                    "state": event.event_type.value,
+                    "progress": event.normalized_metadata.get("progress", 0) if event.normalized_metadata else 0,
+                    "save_path": event.normalized_metadata.get("save_path", "") if event.normalized_metadata else "",
+                    "reason": "no_matching_arr_history",
+                }
+        
+        return list(orphans.values())
+    
+    def get_all_items(self) -> List[CorrelationResult]:
         """Get all correlated media items."""
         return self.correlation_engine.get_all_items()
     

@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 
 from backend.adapters.base import RawEvent, SourceService, MediaType, EventType
+from backend.correlation.matching import _titles_overlap
 
 logger = logging.getLogger("arr-control.correlation")
 
@@ -27,6 +28,8 @@ class CorrelationResult:
         self.current_service = self._determine_current_service()
         self.last_event = self.events[-1] if self.events else None
         self.next_expected_state = self._determine_next_expected()
+        self.confidence = self._determine_confidence()
+        self.download_attempts = self._determine_download_attempts()
     
     def _determine_current_state(self) -> EventType:
         """Determine current state from most recent event using StateMachine."""
@@ -37,6 +40,87 @@ class CorrelationResult:
         from backend.correlation.state_machine import StateMachine
         state, _ = StateMachine.classify_state(self.events)
         return state
+    
+    def _determine_confidence(self) -> str:
+        """Determine correlation confidence.
+        
+        HIGH: exact hash match between *Arr (source_download_id) and qBittorrent (hash)
+        MEDIUM: has category/tag correlation AND at least one *Arr event (but no hash match)
+        LOW: only qBittorrent events (no *Arr events), or only heuristic
+        """
+        # Check for exact hash match between *Arr and qBittorrent
+        arr_hashes = set()
+        qbit_hashes = set()
+        has_arr_event = False
+        
+        for e in self.events:
+            if e.source_service in (SourceService.SONARR, SourceService.RADARR):
+                has_arr_event = True
+                if e.source_download_id:
+                    arr_hashes.add(e.source_download_id.upper())
+            elif e.source_service == SourceService.QBITTORRENT and e.source_download_id:
+                qbit_hashes.add(e.source_download_id.upper())
+        
+        # HIGH confidence: at least one hash appears in both *Arr and qBittorrent
+        if arr_hashes & qbit_hashes:
+            return "HIGH"
+        
+        # Check for category/tag correlation
+        has_category = any(
+            e.normalized_metadata and e.normalized_metadata.get("category")
+            for e in self.events
+        )
+        
+        # MEDIUM: has category AND at least one *Arr event (but no hash match)
+        if has_category and has_arr_event:
+            return "MEDIUM"
+        
+        # Heuristic match or only qBittorrent events
+        return "LOW"
+    
+    def _determine_download_attempts(self) -> List[Dict[str, Any]]:
+        """Extract distinct download attempts from events."""
+        attempts = []
+        
+        # Group qBittorrent events by hash
+        qbit_by_hash = {}
+        for event in self.events:
+            if event.source_service == SourceService.QBITTORRENT and event.source_download_id:
+                hash_key = event.source_download_id
+                if hash_key not in qbit_by_hash:
+                    qbit_by_hash[hash_key] = []
+                qbit_by_hash[hash_key].append(event)
+        
+        for hash_key, events in qbit_by_hash.items():
+            events.sort(key=lambda e: e.timestamp)
+            first = events[0]
+            last = events[-1]
+            
+            # Determine if this is cross-seed
+            is_cross_seed = False
+            for e in events:
+                tags = e.normalized_metadata.get("tags", "").lower() if e.normalized_metadata else ""
+                category = e.normalized_metadata.get("category", "").lower() if e.normalized_metadata else ""
+                if "cross-seed" in tags or "cross" in category:
+                    is_cross_seed = True
+                    break
+            
+            # Determine final state
+            final_state = events[-1].event_type
+            
+            attempts.append({
+                "hash": hash_key,
+                "first_event": events[0].timestamp.isoformat(),
+                "last_event": events[-1].timestamp.isoformat(),
+                "state": final_state.value,
+                "progress": events[-1].normalized_metadata.get("progress", 0) if events[-1].normalized_metadata else 0,
+                "category": events[0].normalized_metadata.get("category", "") if events[0].normalized_metadata else "",
+                "tags": events[0].normalized_metadata.get("tags", "") if events[0].normalized_metadata else "",
+                "is_cross_seed": is_cross_seed,
+                "event_count": len(events),
+            })
+        
+        return attempts
     
     def _determine_progress(self) -> Optional[int]:
         """Determine progress from events."""
@@ -97,6 +181,39 @@ class CorrelationResult:
                     "normalized_metadata": e.normalized_metadata,
                 }
                 for e in self.events
+            ],
+            "confidence": self.confidence,
+            "download_attempts": self.download_attempts,
+        }
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API response."""
+        return {
+            "correlation_key": self.correlation_key,
+            "media_type": self.media_type.value if self.media_type else None,
+            "media_identifier": self.media_identifier,
+            "title": self.title,
+            "season": self.season,
+            "episode": self.episode,
+            "tvdb_id": self.tvdb_id,
+            "tmdb_id": self.tmdb_id,
+            "imdb_id": self.imdb_id,
+            "current_state": self.current_state.value,
+            "progress": self.progress,
+            "current_service": self.current_service.value if self.current_service else None,
+            "last_event_at": self.last_event.timestamp.isoformat() if self.last_event else None,
+            "next_expected_state": self.next_expected_state.value if self.next_expected_state else None,
+            "event_count": len(self.events),
+            "timeline": [
+                {
+                    "timestamp": e.timestamp.isoformat(),
+                    "source": e.source_service.value,
+                    "event_type": e.event_type.value,
+                    "status": e.status.value,
+                    "error_message": e.error_message,
+                    "normalized_metadata": e.normalized_metadata,
+                }
+                for e in self.events
             ]
         }
 
@@ -115,6 +232,7 @@ class CorrelationEngine:
         - Out-of-order events (sorted by timestamp)
         - Missing events (tolerated)
         - Multiple downloads (tracked per item)
+        - Cross-service hash correlation (Sonarr/Radarr downloadId <-> qBittorrent hash)
         """
         updated = []
         
@@ -126,8 +244,61 @@ class CorrelationEngine:
                 grouped[key] = []
             grouped[key].append(event)
         
-        # Update each group
+        # Build hash-to-key mapping for cross-service correlation
+        # Sonarr/Radarr events with source_download_id should link to qBittorrent hash groups
+        # Only use *Arr events for this mapping, not qBittorrent events
+        hash_to_media_key = {}
         for key, group_events in grouped.items():
+            for event in group_events:
+                if event.source_service in (SourceService.SONARR, SourceService.RADARR) and event.source_download_id:
+                    hash_key = f"hash:{event.source_download_id}"
+                    hash_to_media_key[hash_key] = key
+        
+        # Merge hash groups into media groups where hash matches
+        merged_grouped = {}
+        for key, group_events in grouped.items():
+            if key in merged_grouped:
+                continue
+            
+            # Start with this group's events
+            merged_events = list(group_events)
+            
+            # If this is a media key, check if any hash groups should merge into it
+            if key.startswith("media:"):
+                # Find all hash groups that map to this media key
+                for hash_key, media_key in hash_to_media_key.items():
+                    if media_key == key and hash_key in grouped and hash_key != key:
+                        # Merge hash group events into media group
+                        merged_events.extend(grouped[hash_key])
+            elif key.startswith("hash:"):
+                # If this is a hash key, check if it maps to a media key
+                media_key = hash_to_media_key.get(key)
+                if media_key and media_key != key:
+                    # This hash group will be merged into the media group
+                    # Skip adding it as a separate group
+                    continue
+                else:
+                    # No direct hash match - try title-based matching for cross-seed torrents
+                    # If this hash group's title matches a media item, merge it there
+                    if group_events:
+                        sample_title = group_events[0].title
+                        for media_key, media_events in grouped.items():
+                            if media_key.startswith("media:"):
+                                for me in media_events:
+                                    if _titles_overlap(sample_title, me.title):
+                                        merged_grouped.setdefault(media_key, []).extend(grouped[key])
+                                        break
+                    # If no title match, keep as standalone hash group (orphan)
+                    # Don't continue - let it fall through to add to merged_grouped
+            
+            if merged_events:
+                merged_grouped[key] = merged_events
+            
+            if merged_events:
+                merged_grouped[key] = merged_events
+        
+        # Update each group
+        for key, group_events in merged_grouped.items():
             if key in self.items:
                 # Merge with existing events - dedup by event_type + source_service + timestamp
                 existing = set(
@@ -210,17 +381,18 @@ class CorrelationEngine:
         if event.imdb_id:
             return f"media:{event.imdb_id}"
         
-        # 2. Use media_identifier as fallback for cross-service correlation
+        # 2. For qBittorrent events, always use hash-based correlation key
+        # This prevents qBittorrent events from creating "media:<hash>" keys
+        if event.source_service == SourceService.QBITTORRENT and event.source_download_id:
+            return f"hash:{event.source_download_id}"
+        
+        # 3. Use media_identifier as fallback for cross-service correlation
         if event.media_identifier:
             return f"media:{event.media_identifier}"
         
-        # 3. Explicit correlation key (fallback)
+        # 4. Explicit correlation key (fallback)
         if event.correlation_key:
             return event.correlation_key
-        
-        # 4. Hash-based (qBittorrent)
-        if event.source_download_id:
-            return f"hash:{event.source_download_id}"
         
         # 5. Title-based fallback
         return f"title:{event.media_identifier}:{event.title}"

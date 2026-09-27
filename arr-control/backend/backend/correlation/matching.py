@@ -89,4 +89,14 @@ def _titles_overlap(title1: str, title2: str) -> bool:
     common = words1 & words2
     ratio = len(common) / max(len(words1), len(words2))
     
+    # For cross-seed matching, be more lenient - check for SxxEyy pattern match
+    # and at least 2 other common words
+    sxxeyy1 = {w for w in words1 if re.match(r's\d{1,2}e\d{1,2}', w)}
+    sxxeyy2 = {w for w in words2 if re.match(r's\d{1,2}e\d{1,2}', w)}
+    
+    if sxxeyy1 and sxxeyy2 and sxxeyy1 & sxxeyy2:
+        # Episode pattern matches - check for additional common words
+        other_common = common - sxxeyy1 - sxxeyy2
+        return len(other_common) >= 2
+    
     return ratio > 0.5 and len(common) >= 2

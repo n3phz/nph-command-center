@@ -190,18 +190,25 @@ class QBittorrentAdapter(ServiceAdapter):
         )
     
     def _torrent_to_event(self, torrent: Dict[str, Any], since: Optional[datetime] = None) -> Optional[RawEvent]:
-        """Convert a torrent to a RawEvent."""
+        """Convert a torrent to a RawEvent with full normalization."""
         name = torrent.get("name", "Unknown")
         size = torrent.get("size", 0)
         progress = torrent.get("progress", 0)
         
         # Extract hash for identification
-        torrent_hash = torrent.get("hash", "")
+        torrent_hash = torrent.get("hash", "").upper()
+        if not torrent_hash:
+            return None
         
-        # Determine media type
-        media_type = MediaType.MOVIE
-        if any(s in name.lower() for s in ["s0", "e0", "episode", "s0", "season"]):
-            media_type = MediaType.EPISODE
+        # Determine media type from category/tags
+        category = torrent.get("category", "").lower()
+        tags = torrent.get("tags", "").lower()
+        
+        is_tv = any(x in category for x in ["tv", "sonarr"]) or "sonarr" in tags
+        is_movie = any(x in category for x in ["radarr", "movie"]) or "radarr" in tags
+        
+        # Fallback to name heuristic
+        media_type = MediaType.EPISODE if is_tv or (not is_movie and any(s in name.lower() for s in ["s0", "e0", "episode", "season"])) else MediaType.MOVIE
         
         state = torrent.get("state", "unknown")
         event_type = self._map_state(state)
@@ -209,9 +216,14 @@ class QBittorrentAdapter(ServiceAdapter):
         
         # Track downloaded amount for progress
         downloaded = torrent.get("downloaded", 0)
+        added_on = torrent.get("added_on", 0)
+        completion_on = torrent.get("completion_on", 0)
+        
+        # Use added_on as timestamp if available, else now
+        timestamp = datetime.utcfromtimestamp(added_on) if added_on else datetime.utcnow()
         
         return RawEvent(
-            timestamp=datetime.utcnow(),
+            timestamp=timestamp,
             source_service=SourceService.QBITTORRENT,
             event_type=event_type,
             media_type=media_type,
@@ -228,7 +240,14 @@ class QBittorrentAdapter(ServiceAdapter):
                 "dl_speed": torrent.get("dlspeed", 0),
                 "ul_speed": torrent.get("upspeed", 0),
                 "peers": torrent.get("num_peers", 0),
-                "seeds": torrent.get("num_seeds", 0)
+                "seeds": torrent.get("num_seeds", 0),
+                "category": category,
+                "tags": tags,
+                "save_path": torrent.get("save_path", ""),
+                "content_path": torrent.get("content_path", ""),
+                "ratio": torrent.get("ratio", 0),
+                "added_on": added_on,
+                "completion_on": completion_on,
             },
             status=status
         )
