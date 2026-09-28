@@ -2,9 +2,10 @@ interface ExplanationProps {
   reason: string;
   evidence: string[];
   confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  guardarrEvidence?: string[];
 }
 
-export const ExplanationCard: React.FC<ExplanationProps> = ({ reason, evidence, confidence }) => {
+export const ExplanationCard: React.FC<ExplanationProps> = ({ reason, evidence, confidence, guardarrEvidence }) => {
   const confidenceColors: Record<string, string> = {
     HIGH: '#00b894',
     MEDIUM: '#fdcb6e',
@@ -37,6 +38,16 @@ export const ExplanationCard: React.FC<ExplanationProps> = ({ reason, evidence, 
             <li key={index}>{item}</li>
           ))}
         </ul>
+      )}
+      {guardarrEvidence && guardarrEvidence.length > 0 && (
+        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #333' }}>
+          <h4 style={{ margin: '0 0 0.5rem 0', color: '#0abde3' }}>Guardarr Evidence</h4>
+          <ul style={{ paddingLeft: '1.5rem', fontSize: '0.875rem', color: '#888' }}>
+            {guardarrEvidence.map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

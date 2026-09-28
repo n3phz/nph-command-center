@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     prowlarr_timeout_seconds: int = Field(default=10)
     prowlarr_verify_tls: bool = Field(default=True)
 
+    # Guardarr Configuration
+    guardarr_url: str = Field(default="http://localhost:8000")
+    guardarr_api_key: str = Field(default="")
+    guardarr_timeout_seconds: int = Field(default=10)
+    guardarr_verify_tls: bool = Field(default=True)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

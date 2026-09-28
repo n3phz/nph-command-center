@@ -18,6 +18,7 @@ export interface MediaItem {
   download_attempts?: DownloadAttempt[];
   ingestion_sources?: ('webhook' | 'polling')[];
   state?: string; // For PipelineRow compatibility
+  guardarr_events?: GuardarrEvent[];
 }
 
 export interface PipelineRow {
@@ -79,6 +80,28 @@ export interface SearchEvent {
   indexer: string;
   results: number;
   timestamp: string;
+}
+
+export interface GuardarrEvent {
+  id: string;
+  timestamp: string;
+  event_type: string;
+  state: string;
+  reservation_id?: string;
+  content_id?: string;
+  arr_item_id?: string;
+  torrent_metadata_hash?: string;
+  associated_path?: string;
+  target_device?: string;
+  max_bytes?: number;
+  expected_bytes?: number;
+  observed_materialized_bytes?: number;
+  remaining_unfulfilled_bytes?: number;
+  import_mode?: string;
+  priority?: number;
+  owner?: string;
+  torrent_tag?: string;
+  idempotency_key?: string;
 }
 
 export interface Event {

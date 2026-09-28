@@ -41,6 +41,17 @@ export const Timeline: React.FC<TimelineProps> = ({ events }) => {
       indexer_search_completed: '✓',
       indexer_search_failed: '✗',
       release_rejected: '⊘',
+      storage_estimate: '📊',
+      storage_admit: '✅',
+      storage_release: '🔓',
+      storage_reconcile: '🔄',
+      security_scan: '🔍',
+      security_allowed: '✅',
+      security_blocked: '🚫',
+      security_quarantined: '🔒',
+      security_alert: '⚠',
+      torrent_associated: '🔗',
+      torrent_unreserved: '❌',
     };
     return icons[eventType] || '•';
   };
@@ -67,6 +78,17 @@ export const Timeline: React.FC<TimelineProps> = ({ events }) => {
       indexer_search_completed: '#00b894',
       indexer_search_failed: '#d63031',
       release_rejected: '#fd79a8',
+      storage_estimate: '#74b9ff',
+      storage_admit: '#00b894',
+      storage_release: '#fdcb6e',
+      storage_reconcile: '#a29bfe',
+      security_scan: '#74b9ff',
+      security_allowed: '#00b894',
+      security_blocked: '#d63031',
+      security_quarantined: '#e17055',
+      security_alert: '#d63031',
+      torrent_associated: '#0abde3',
+      torrent_unreserved: '#636e72',
     };
     return colors[eventType] || '#00d4ff';
   };
