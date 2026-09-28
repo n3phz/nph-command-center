@@ -1,8 +1,8 @@
-# ARR Control
+# Media Control Plane
 
-## Media Automation Control Plane
+**Evidence-based control and observability for automated media pipelines.**
 
-**ARR Control** (Automation Runtime Control) is a specialized control plane for media automation stacks built around **Sonarr**, **Radarr**, **qBittorrent**, **Prowlarr**, and **Guardarr**. 
+Media Control Plane (MCP) is a specialized control plane for media automation stacks built around **Sonarr**, **Radarr**, **qBittorrent**, **Prowlarr**, and **Guardarr**.
 
 It is **not**:
 - A replacement for Sonarr/Radarr
@@ -11,7 +11,7 @@ It is **not**:
 
 Instead, it is the **evidence-first control layer** that observes, correlates, and explains events across these systems.
 
-### Core Concept
+## Core Concept
 
 ```
 WANTED
@@ -29,7 +29,7 @@ WHY EXPLANATION
 
 Every step in this pipeline is grounded in **actual observed data**, never speculation or inference.
 
-### Key Features
+## Key Features
 
 | Feature | Description |
 |---------|-------------|
@@ -41,7 +41,7 @@ Every step in this pipeline is grounded in **actual observed data**, never specu
 | **Historical Backfill** | Idempotent import of past events |
 | **Production Deployment** | Docker Compose for clean installation |
 
-### Current State
+## Current State
 
 | Component | Status |
 |-----------|--------|
@@ -54,16 +54,16 @@ Every step in this pipeline is grounded in **actual observed data**, never specu
 | **Frontend Build** | Successful |
 | **Docker Deployment** | Configuration provided |
 
-### Live Validation Status
+## Live Validation Status
 
 The system has been validated against a live test deployment. However, **real-time Guardarr correlation has not yet been observed** due to environment constraints. The implementation remains ready for production deployment.
 
-### Quick Start
+## Quick Start
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/arr-control.git
-cd arr-control
+git clone https://github.com/n3phz/media-control-plane.git
+cd media-control-plane
 
 # Build and run with Docker Compose
 docker compose up --build
@@ -71,19 +71,19 @@ docker compose up --build
 
 Environment variables are configured via `.env` with placeholders. Replace with actual values for production.
 
-### Screenshots
+## Screenshots
 
 *(Insert polished screenshots of Dashboard, Activity, Timeline, Media Detail, and WHY explanations)*
 
-### Architecture
+## Architecture
 
 ![Architecture Diagram](docs/architecture.svg)
 
 *(Rendered Mermaid diagram showing event flow from data sources → correlation engine → UI)*
 
-### Evidence Boundaries
+## Evidence Boundaries
 
-ARR Control adheres to strict evidence-based principles:
+Media Control Plane adheres to strict evidence-based principles:
 
 - **Never invent causal relationships** without observable proof
 - **Preserve source metadata** for all events
@@ -118,4 +118,4 @@ Visit `/api/docs` for interactive Swagger UI.
 
 ---
 
-*ARR Control is currently in active development. Features are progressively rolling out. Contributions welcome.*
+*Media Control Plane is currently in active development. Features are progressively rolling out. Contributions welcome.*
