@@ -71,4 +71,4 @@ backups/
 
 # Steam trade bot
 /projects/steam-trade-bot/app/secrets/
-/projects/steam-trade-bot/tests/fixtures/secrets/
+/projects/steam-trade-bot/tests/fixtures/secrets/projects/steam-trade-bot/
