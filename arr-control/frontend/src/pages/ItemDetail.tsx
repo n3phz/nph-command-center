@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api } from './services/api';
-import { ItemDetail, Explanation } from './types';
-import Timeline from './components/Timeline';
-import ExplanationCard from './components/ExplanationCard';
-import DownloadAttempt from './components/DownloadAttempt';
+import { api } from '../services/api';
+import { ItemDetail, Explanation } from '../types';
+import Timeline from '../components/Timeline';
+import ExplanationCard from '../components/ExplanationCard';
+import DownloadAttempt from '../components/DownloadAttempt';
 
 function ItemDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -27,8 +27,8 @@ function ItemDetailPage() {
         api.getItem(id),
         api.getItemExplanation(id)
       ]);
-      setItem(itemData);
-      setExplanation(explanationData);
+      setItem(itemData as ItemDetail | null);
+      setExplanation(explanationData as Explanation | null);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load item');

@@ -17,6 +17,28 @@ export interface MediaItem {
   confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
   download_attempts?: DownloadAttempt[];
   ingestion_sources?: ('webhook' | 'polling')[];
+  state?: string; // For PipelineRow compatibility
+}
+
+export interface PipelineRow {
+  id: string;
+  title: string;
+  state: string;
+  progress?: number;
+  current_service?: string;
+  last_event_at?: string;
+  season?: number;
+  episode?: number;
+  media_type: 'movie' | 'episode';
+  tvdb_id?: string;
+  tmdb_id?: string;
+  imdb_id?: string;
+  current_state: string;
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  download_attempts?: DownloadAttempt[];
+  ingestion_sources?: ('webhook' | 'polling')[];
+  first_seen_at?: string;
+  event_count: number;
 }
 
 export interface DownloadAttempt {

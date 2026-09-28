@@ -1,6 +1,5 @@
-"""Activity page component."""
+/** Activity page component. */
 import { useState, useEffect } from 'react';
-import { api } from '../pages/services/api';
 import { Event } from '../types';
 
 interface Props {

@@ -1,4 +1,4 @@
-import { DownloadAttempt as DownloadAttemptType } from './types';
+import { DownloadAttempt as DownloadAttemptType } from '../types';
 
 interface Props {
   attempt: DownloadAttemptType;

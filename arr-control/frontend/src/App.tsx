@@ -74,7 +74,7 @@ function App() {
 
           <section className="pipeline-section">
             <h2 className="section-title">Active Pipeline</h2>
-            <PipelineList items={items} onItemSelect={handleItemSelect} />
+            <PipelineList items={items.map(i => ({...i, state: i.current_state}))} onItemSelect={handleItemSelect} />
           </section>
 
           {summary.attention > 0 && (
