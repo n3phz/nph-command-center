@@ -28,7 +28,7 @@ from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional, Sequence
 
-from acquisition import record_acquisition, RecordedAcquisition, AcquisitionError, Repository
+from acquisition import record_acquisition, RecordedAcquisition, AcquisitionError, Repository, _serialize_provenance
 from transactions import CostStatus, SourceType, Provenance, EvidenceType
 
 
@@ -766,25 +766,30 @@ class AcquisitionDetector:
     ) -> list[AcquisitionResult]:
         """Reconcile existing UNKNOWN lots with later-found evidence.
 
-        Scans for UNKNOWN lots that now have matching Market History
-        purchases and creates new TRACKED lots alongside them (never
-        modifying the original UNKNOWN lot).
+        For each UNKNOWN lot that now has matching Market History evidence,
+        UPDATE the existing lot to TRACKED status with provenance populated.
+        This avoids creating duplicate economic positions.
 
         Args:
             session: Authenticated Steam session.
             lookback_days: How far back to look for evidence.
 
         Returns:
-            List of new AcquisitionResult objects (TRACKED lots created).
+            List of AcquisitionResult objects for reconciled lots.
         """
         results = []
+
+        # Without a session there is nothing to enrich with. Exiting early
+        # keeps the anonymous case cheap and leaves every lot UNKNOWN.
+        if session is None:
+            return results
 
         # Find UNKNOWN lots without provenance
         conn = self.repository.connection
         unknown_lots = conn.execute(
             """
-            SELECT al.id, al.market_hash_name, al.original_quantity,
-                   al.acquired_at, al.external_ref
+            SELECT al.id, al.source_transaction_id, al.market_hash_name,
+                   al.original_quantity, al.acquired_at, al.external_ref
             FROM acquisition_lots al
             WHERE al.cost_status = 'UNKNOWN'
               AND (al.external_ref IS NULL OR al.external_ref LIKE 'unknown:%')
@@ -796,7 +801,7 @@ class AcquisitionDetector:
         ).fetchall()
 
         for lot_row in unknown_lots:
-            lot_id, mhn, qty, acquired_at, _ = lot_row
+            lot_id, source_tx_id, mhn, qty, acquired_at, _ = lot_row
 
             try:
                 acquired_date = self._parse_date(acquired_at)
@@ -805,6 +810,10 @@ class AcquisitionDetector:
                     acquired_date,
                     session,
                 )
+
+                if not purchases:
+                    # No evidence for this lot yet — stays UNKNOWN.
+                    continue
 
                 # Create synthetic delta for matching
                 delta = InventoryDelta(
@@ -817,16 +826,127 @@ class AcquisitionDetector:
                 )
 
                 matching = self.find_matching_purchase(delta, purchases)
-                if matching is not None:
-                    # Found evidence — create new TRACKED lot
-                    result = self._record_tracked(delta, matching)
-                    results.append(result)
+                if matching is None:
+                    # Absent or ambiguous evidence — never guess, stays UNKNOWN.
+                    continue
+
+                # Update the existing UNKNOWN lot to TRACKED. The lot row and
+                # its source transaction are written in ONE explicit
+                # transaction so a partial write can never be persisted, and
+                # the write lock is released before the next bot reads or
+                # writes (the 63a84b6 regression).
+                conn.execute("BEGIN")
+                try:
+                    result = self._update_tracked(
+                        lot_id, source_tx_id, delta, matching
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+
+                results.append(result)
 
             except Exception:
-                # Skip lots we can't process
+                # Skip lots we can't process; the lot remains UNKNOWN.
                 continue
 
         return results
+
+    def _update_tracked(
+        self,
+        lot_id: int,
+        source_tx_id: int,
+        delta: InventoryDelta,
+        purchase: MarketHistoryPurchase,
+    ) -> AcquisitionResult:
+        """Update an existing UNKNOWN lot to TRACKED status.
+
+        This preserves the original lot record while adding provenance
+        and cost basis from the matched Market History purchase.
+
+        Args:
+            lot_id: ID of the UNKNOWN lot to update.
+            source_tx_id: Source transaction ID.
+            delta: Inventory delta for context.
+            purchase: Matching Market History purchase.
+
+        Returns:
+            AcquisitionResult with updated TRACKED status.
+        """
+        # Convert cents to Decimal, divided by quantity for unit cost
+        unit_cost = Decimal(purchase.paid_amount_cents) / Decimal(100) / Decimal(purchase.quantity)
+
+        # Get currency code
+        currency = self.CURRENCY_MAP.get(purchase.currencyid, "EUR")
+
+        # Create provenance
+        provenance = Provenance(
+            evidence_type=EvidenceType.STEAM_MARKET_HISTORY,
+            evidence_id=purchase.purchaseid,
+            evidence_data={
+                "listingid": purchase.listingid,
+                "paid_amount_cents": purchase.paid_amount_cents,
+                "currencyid": purchase.currencyid,
+                "timestamp_iso": datetime.fromtimestamp(
+                    purchase.time_event_unix, tz=timezone.utc
+                ).isoformat(),
+            },
+        )
+
+        # Update the existing lot
+        conn = self.repository.connection
+        conn.execute(
+            """
+            UPDATE acquisition_lots
+            SET cost_status = 'TRACKED',
+                unit_cost = ?,
+                source_type = ?,
+                external_ref = ?,
+                provenance = ?
+            WHERE id = ?
+            """,
+            (
+                str(unit_cost),
+                SourceType.STEAM_MARKET_PURCHASE.value,
+                purchase.external_ref,
+                _serialize_provenance(provenance),
+                lot_id,
+            ),
+        )
+
+        # Also update the source transaction with cost info
+        conn.execute(
+            """
+            UPDATE transactions
+            SET unit_price = ?,
+                fees = ?,
+                total_value = ?,
+                timestamp = ?
+            WHERE id = ?
+            """,
+            (
+                str(unit_cost),
+                "0",
+                str(unit_cost * delta.quantity_change),
+                datetime.fromtimestamp(
+                    purchase.time_event_unix, tz=timezone.utc
+                ).isoformat(),
+                source_tx_id,
+            ),
+        )
+
+        return AcquisitionResult(
+            bot_name=delta.bot_name,
+            market_hash_name=delta.market_hash_name,
+            quantity=delta.quantity_change,
+            cost_status=CostStatus.TRACKED,
+            source_type=SourceType.STEAM_MARKET_PURCHASE,
+            provenance=provenance,
+            created=False,  # Updated existing, not new
+            lot_id=lot_id,
+            transaction_id=source_tx_id,
+        )
 
 
 __all__ = [

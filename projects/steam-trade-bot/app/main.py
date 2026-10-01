@@ -645,6 +645,20 @@ def _run_acquisition_detection(bot_name: str, snapshot_id: int) -> None:
     # Process the new snapshot
     results = detector.detect_acquisition(session, process_new_snapshots=True)
 
+    # Phase 3E: Run delayed-evidence reconciliation for existing UNKNOWN lots.
+    # This runs only when an authenticated Steam web session is active. Missing
+    # authentication is non-fatal: existing UNKNOWN lots remain UNKNOWN.
+    if session is not None:
+        import logging
+        try:
+            reconcile_results = detector.reconcile_delayed_evidence(session)
+            for result in reconcile_results:
+                logging.info(
+                    f"Reconciled TRACKED: {bot_name} {result.market_hash_name} x{result.quantity} lot={result.lot_id}"
+                )
+        except Exception as exc:
+            logging.warning(f"Delayed evidence reconciliation failed for {bot_name}: {exc}")
+
     # Log results for observability
     import logging
     for result in results:
