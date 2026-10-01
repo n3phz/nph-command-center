@@ -90,29 +90,17 @@ def _parse_cookie_material(raw: str) -> list[tuple[str, str]]:
 
     text = raw.replace("\r\n", "\n").replace("\r", "\n")
 
-    # Prefer line-oriented parsing so that a value containing ';' survives.
+    # Each logical cookie chunk may be on its own line, or several chunks
+    # may share a line as a Cookie: header (name=value; name=value).
+    chunks: list[str] = []
     for line in text.split("\n"):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if "=" not in line:
-            continue
-        name, _, value = line.partition("=")
-        name = name.strip()
-        value = value.strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        pairs.append((name, value))
-        continue
+        chunks.extend(part.strip() for part in line.split(";") if part.strip())
 
-    if pairs:
-        return pairs
-
-    # Fallback: a single cookie-header style blob.
-    for chunk in text.split(";"):
-        chunk = chunk.strip()
-        if not chunk or "=" not in chunk:
+    for chunk in chunks:
+        if "=" not in chunk:
             continue
         name, _, value = chunk.partition("=")
         name = name.strip()
