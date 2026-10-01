@@ -478,9 +478,15 @@ class AcquisitionDetector:
         # Filter to only positive deltas
         positive_deltas = [d for d in deltas if d.quantity_change > 0]
         if not positive_deltas:
-            # No acquisitions to record, but mark snapshot as processed
+            # No acquisitions to record, but mark snapshot as processed.
+            # Must run inside its own BEGIN/COMMIT transaction because
+            # _mark_snapshot_processed_atomic() does NOT commit — it relies
+            # on the caller owning an active transaction. Without a commit
+            # here, the INSERT into acquisition_processing_log stays in an
+            # open SQLite write transaction, which blocks the next bot's
+            # database write with "database is locked".
             if process_new_snapshots:
-                self._mark_snapshot_processed_atomic(current.snapshot_id, [])
+                self._mark_snapshot_processed_committed(current.snapshot_id)
             return results
 
         # Process each positive delta within a single transaction
@@ -686,6 +692,11 @@ class AcquisitionDetector:
 
         Creates the processing log table if it doesn't exist.
         Does NOT commit or rollback — caller manages the transaction.
+
+        This method is intended for use inside an explicit BEGIN/COMMIT
+        block where the caller owns the transaction lifecycle. It performs
+        no commit so that the caller can include additional writes (e.g.
+        acquisition persistence) in the same atomic transaction.
         """
         conn = self.repository.connection
         conn.execute(
@@ -708,6 +719,45 @@ class AcquisitionDetector:
             (self.bot_name, snapshot_id, datetime.now(timezone.utc).isoformat()),
         )
         # NO commit — caller manages transaction
+
+    def _mark_snapshot_processed_committed(self, snapshot_id: int) -> None:
+        """Mark a snapshot as processed and commit immediately.
+
+        Opens its own BEGIN/COMMIT transaction so that the processing
+        marker is persisted atomically and the SQLite connection is
+        released before the next database write. This is the correct
+        entry point for the zero-positive-delta path where there is no
+        surrounding acquisition-persistence transaction.
+
+        Raises:
+            Exception: Re-rolled-back and re-raised if the write fails.
+        """
+        conn = self.repository.connection
+        try:
+            conn.execute("BEGIN")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS acquisition_processing_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bot_name TEXT NOT NULL,
+                    snapshot_id INTEGER NOT NULL,
+                    processed_at TEXT NOT NULL,
+                    UNIQUE(bot_name, snapshot_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO acquisition_processing_log
+                    (bot_name, snapshot_id, processed_at)
+                VALUES (?, ?, ?)
+                """,
+                (self.bot_name, snapshot_id, datetime.now(timezone.utc).isoformat()),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def reconcile_delayed_evidence(
         self,
