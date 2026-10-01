@@ -14,6 +14,7 @@ Phase 1 invariants enforced:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -92,6 +93,63 @@ __all__ = [
 ]
 
 
+#: Optional Phase 3D evidence columns on acquisition_lots. Absent on
+#: databases created before Phase 3D; callers degrade gracefully.
+_PROVENANCE_COLUMNS = ("provenance", "source_type", "external_ref")
+
+
+def _existing_columns(conn, table: str) -> set:
+    """Return the set of columns present on ``table`` (empty on error)."""
+    try:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    except Exception:
+        return set()
+
+
+def _serialize_provenance(provenance) -> Optional[str]:
+    """Serialize a Provenance object to JSON text for storage."""
+    if provenance is None:
+        return None
+    evidence_type = getattr(provenance, "evidence_type", None)
+    value = getattr(evidence_type, "value", evidence_type)
+    return json.dumps(
+        {
+            "evidence_type": None if value is None else str(value),
+            "evidence_id": getattr(provenance, "evidence_id", ""),
+            "evidence_data": getattr(provenance, "evidence_data", {}) or {},
+        },
+        sort_keys=True,
+    )
+
+
+def _deserialize_provenance(raw) -> Optional[Provenance]:
+    """Rebuild a Provenance object from stored JSON text.
+
+    Returns None when the payload is missing or unparseable, so that a
+    corrupt evidence column can never crash a read path.
+    """
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    raw_type = data.get("evidence_type")
+    try:
+        evidence_type = EvidenceType(raw_type) if raw_type else EvidenceType.MANUAL
+    except ValueError:
+        evidence_type = EvidenceType.MANUAL
+
+    return Provenance(
+        evidence_type=evidence_type,
+        evidence_id=str(data.get("evidence_id") or ""),
+        evidence_data=data.get("evidence_data") or {},
+    )
+
+
 class Repository:
     """Database repository for acquisition operations.
 
@@ -130,20 +188,35 @@ class Repository:
         )
 
     def get_lot_by_source_transaction(self, source_transaction_id: int) -> Optional[AcquisitionLotRecord]:
-        """Look up acquisition lot by source transaction."""
-        row = self.connection.execute(
-            """
-            SELECT id, source_transaction_id, market_hash_name, bot_name,
-                   original_quantity, remaining_quantity, unit_cost,
-                   acquired_at, cost_status
-            FROM acquisition_lots
-            WHERE source_transaction_id = ?
-            """,
-            (source_transaction_id,),
-        ).fetchone()
+        """Look up acquisition lot by source transaction.
+
+        Phase 3D: reads the optional evidence columns when they exist so a
+        TRACKED lot returns its provenance instead of silently losing it.
+        """
+        available = _existing_columns(self.connection, "acquisition_lots")
+        extra = [col for col in _PROVENANCE_COLUMNS if col in available]
+
+        select = (
+            "SELECT id, source_transaction_id, market_hash_name, bot_name,"
+            " original_quantity, remaining_quantity, unit_cost,"
+            " acquired_at, cost_status"
+        )
+        if extra:
+            select += ", " + ", ".join(extra)
+        select += " FROM acquisition_lots WHERE source_transaction_id = ?"
+
+        row = self.connection.execute(select, (source_transaction_id,)).fetchone()
 
         if row is None:
             return None
+
+        provenance = _deserialize_provenance(row[9]) if extra and len(row) > 9 else None
+        source_type = None
+        if extra and len(row) > 10 and row[10]:
+            try:
+                source_type = SourceType(row[10])
+            except ValueError:
+                source_type = None
 
         unit_cost = Decimal(row[6]) if row[6] is not None else None
         return AcquisitionLotRecord(
@@ -156,8 +229,8 @@ class Repository:
             unit_cost=unit_cost,
             acquired_at=row[7],
             cost_status=CostStatus(row[8]),
-            source_type=None,
-            provenance=None,
+            source_type=source_type,
+            provenance=provenance,
         )
 
     def insert_transaction_and_lot(
@@ -166,6 +239,9 @@ class Repository:
         unit_cost: Optional[Decimal],
         acquired_at: str,
         cost_status: CostStatus,
+        provenance: Optional[Provenance] = None,
+        source_type: Optional[SourceType] = None,
+        external_ref: Optional[str] = None,
     ) -> tuple[int, int]:
         """Insert transaction and acquisition lot atomically.
 
@@ -214,9 +290,12 @@ class Repository:
                 remaining_quantity,
                 unit_cost,
                 acquired_at,
-                cost_status
+                cost_status,
+                provenance,
+                source_type,
+                external_ref
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 transaction_id,
@@ -227,6 +306,9 @@ class Repository:
                 str(unit_cost) if unit_cost is not None else None,
                 acquired_at,
                 cost_status.value,
+                _serialize_provenance(provenance) if provenance is not None else None,
+                source_type.value if source_type is not None else None,
+                external_ref,
             ),
         )
 
@@ -347,6 +429,9 @@ def record_acquisition(
         unit_cost=unit_cost,
         acquired_at=acquired_at_iso,
         cost_status=cost_status,
+        provenance=provenance,
+        source_type=source_type,
+        external_ref=external_reference,
     )
 
     # Read back the created records

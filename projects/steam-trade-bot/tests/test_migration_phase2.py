@@ -76,23 +76,31 @@ def create_minimal_v1_db():
             updated_at TEXT
         );
         CREATE TABLE transactions (
-            id TEXT PRIMARY KEY,
-            transaction_type TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
             market_hash_name TEXT NOT NULL,
             quantity INTEGER NOT NULL,
             unit_price TEXT NOT NULL,
-            total_price TEXT NOT NULL,
-            occurred_at TEXT NOT NULL
+            fees TEXT NOT NULL DEFAULT '0',
+            total_value TEXT NOT NULL DEFAULT '0',
+            timestamp TEXT NOT NULL,
+            bot_name TEXT NOT NULL,
+            external_ref TEXT
         );
-        CREATE TABLE acquisition_lots (
-            id TEXT PRIMARY KEY,
-            transaction_id TEXT,
+                CREATE TABLE acquisition_lots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_transaction_id INTEGER NOT NULL REFERENCES transactions(id),
             market_hash_name TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
+            bot_name TEXT NOT NULL,
+            original_quantity INTEGER NOT NULL CHECK(original_quantity > 0),
             remaining_quantity INTEGER NOT NULL,
             unit_cost TEXT,
             acquired_at TEXT NOT NULL,
-            cost_status TEXT NOT NULL
+            cost_status TEXT NOT NULL CHECK(cost_status IN ('TRACKED', 'UNKNOWN')),
+            provenance TEXT,
+            source_type TEXT,
+            external_ref TEXT,
+            FOREIGN KEY(source_transaction_id) REFERENCES transactions(id)
         );
     """)
     return conn
@@ -121,14 +129,14 @@ def insert_test_data(conn):
     
     # Insert old-format transaction
     conn.execute(
-        "INSERT OR IGNORE INTO transactions (id, transaction_type, market_hash_name, quantity, unit_price, total_price, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("old-tx-1", "BUY", "Test Item", 1, "1.50", "1.50", "2026-09-29T10:00:00Z")
+        "INSERT OR IGNORE INTO transactions (id, type, market_hash_name, quantity, unit_price, fees, total_value, timestamp, bot_name, external_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (1, "BUY", "Test Item", 1, "1.50", "0.15", "1.65", "2026-09-29T10:00:00Z", "cesarpereira27", "old-tx-1")
     )
     
     # Insert old-format acquisition lot
     conn.execute(
-        "INSERT OR IGNORE INTO acquisition_lots (id, transaction_id, market_hash_name, quantity, remaining_quantity, unit_cost, acquired_at, cost_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("old-lot-1", "old-tx-1", "Test Item", 1, 1, "1.50", "2026-09-29T10:00:00Z", "TRACKED")
+        "INSERT OR IGNORE INTO acquisition_lots (id, source_transaction_id, market_hash_name, original_quantity, remaining_quantity, unit_cost, acquired_at, cost_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (1, 1, "Test Item", 1, 1, "1.50", "2026-09-29T10:00:00Z", "TRACKED")
     )
     
     conn.commit()

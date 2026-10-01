@@ -111,6 +111,17 @@ def _migrate_acquisition_lots(cursor: sqlite3.Cursor) -> None:
             cursor.execute(f"ALTER TABLE acquisition_lots ADD COLUMN {col_name} {col_type}")
             print(f"  Added column: acquisition_lots.{col_name}")
 
+    # Phase 3D: add evidence columns if not present
+    phase3d_cols = {
+        "provenance": "TEXT",
+        "source_type": "TEXT",
+        "external_ref": "TEXT",
+    }
+    for col_name, col_type in phase3d_cols.items():
+        if col_name not in cols:
+            cursor.execute(f"ALTER TABLE acquisition_lots ADD COLUMN {col_name} {col_type}")
+            print(f"  Added column: acquisition_lots.{col_name}")
+
     # Recreate index
     cursor.execute("DROP INDEX IF EXISTS idx_acq_lots_source_tx")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_acq_lots_source_tx ON acquisition_lots(source_transaction_id)")

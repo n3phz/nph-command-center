@@ -783,11 +783,11 @@ class AcquisitionDetector:
         conn = self.repository.connection
         unknown_lots = conn.execute(
             """
-            SELECT al.id, al.market_hash_name, al.quantity, al.acquired_at,
-                   al.source_key
+            SELECT al.id, al.market_hash_name, al.original_quantity,
+                   al.acquired_at, al.external_ref
             FROM acquisition_lots al
             WHERE al.cost_status = 'UNKNOWN'
-              AND al.source_key IS NULL
+              AND (al.external_ref IS NULL OR al.external_ref LIKE 'unknown:%')
               AND al.bot_name = ?
             ORDER BY al.acquired_at DESC
             LIMIT 100

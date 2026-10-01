@@ -50,16 +50,19 @@ def create_schema(conn):
         ON transactions(bot_name, external_ref)
         WHERE external_ref IS NOT NULL;
 
-        CREATE TABLE acquisition_lots (
+                CREATE TABLE acquisition_lots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source_transaction_id INTEGER NOT NULL REFERENCES transactions(id),
             market_hash_name TEXT NOT NULL,
             bot_name TEXT NOT NULL,
             original_quantity INTEGER NOT NULL CHECK(original_quantity > 0),
-            remaining_quantity INTEGER NOT NULL CHECK(remaining_quantity >= 0 AND remaining_quantity <= original_quantity),
+            remaining_quantity INTEGER NOT NULL,
             unit_cost TEXT,
             acquired_at TEXT NOT NULL,
             cost_status TEXT NOT NULL CHECK(cost_status IN ('TRACKED', 'UNKNOWN')),
+            provenance TEXT,
+            source_type TEXT,
+            external_ref TEXT,
             FOREIGN KEY(source_transaction_id) REFERENCES transactions(id)
         );
         """

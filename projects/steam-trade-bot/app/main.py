@@ -12,6 +12,11 @@ import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+from steam_web_session import (
+    apply_steam_web_session,
+    SteamWebSessionStatus,
+)
+
 
 # ============================================================
 # CONFIGURATION
@@ -123,6 +128,10 @@ session.headers.update(
 )
 
 _last_market_request = 0.0
+
+# Populated at startup by apply_steam_web_session(). Holds no secret
+# material — only cookie NAMES and a boolean.
+_steam_web_session_status: SteamWebSessionStatus | None = None
 
 
 # ============================================================
@@ -1583,6 +1592,15 @@ def scan_all_bots():
 @app.on_event("startup")
 def startup():
     init_db()
+
+    # Phase 3D: attach the Steam web session needed for authenticated
+    # Market History. Absent secret is non-fatal: acquisition detection
+    # simply degrades to the existing safe UNKNOWN path.
+    global _steam_web_session_status
+    _steam_web_session_status = apply_steam_web_session(session)
+
+    import logging
+    logging.info(_steam_web_session_status.as_log_message())
 
 
 # ============================================================
