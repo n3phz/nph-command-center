@@ -100,30 +100,55 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _to_decimal(value, field: str) -> Decimal:
+    """Convert value to Decimal, accepting str, int, or Decimal."""
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise TransactionError(f"{field} must be a valid decimal string") from exc
+
+
 def create_transaction(
     type: str,
     market_hash_name: str,
     quantity: int,
-    unit_price: Decimal,
-    fees: Decimal,
-    total_value: Decimal,
-    timestamp: str,
-    bot_name: str,
+    unit_price,
+    fees,
+    total_value=None,
+    timestamp: str = "",
+    bot_name: str = "",
     external_ref: Optional[str] = None,
 ) -> Transaction:
     """Create and validate a Transaction.
 
     This is a thin validation wrapper that ensures all Transaction
     invariants are checked at creation time.
+
+    Accepts str, int, or Decimal for monetary fields and converts to
+    Decimal internally. When total_value is None, it is derived as
+    unit_price * quantity. When timestamp is empty, the current UTC
+    time is used.
     """
+    unit_price_dec = _to_decimal(unit_price, "unit_price")
+    fees_dec = _to_decimal(fees, "fees")
+
+    if total_value is None:
+        total = unit_price_dec * quantity
+    else:
+        total = _to_decimal(total_value, "total_value")
+        if not total.is_finite() or total < 0:
+            raise TransactionError("total_value must be a non-negative Decimal")
+
     return Transaction(
         type=TransactionType(type),
         market_hash_name=market_hash_name,
         quantity=quantity,
-        unit_price=unit_price,
-        fees=fees,
-        total_value=total_value,
-        timestamp=timestamp,
+        unit_price=unit_price_dec,
+        fees=fees_dec,
+        total_value=total,
+        timestamp=timestamp or _utc_now_iso(),
         bot_name=bot_name,
         external_ref=external_ref,
     )
@@ -150,17 +175,17 @@ class Transaction:
 
     def __post_init__(self) -> None:
         if not isinstance(self.type, TransactionType):
-            raise TransactionError("type must be a TransactionType")
+            raise TransactionValidationError("type must be a TransactionType")
         if not self.market_hash_name or not self.market_hash_name.strip():
-            raise TransactionError("market_hash_name must be a non-empty string")
+            raise TransactionValidationError("market_hash_name must be a non-empty string")
         _require_positive_int(self.quantity, "quantity")
         _require_non_negative_decimal(self.unit_price, "unit_price")
         _require_non_negative_decimal(self.fees, "fees")
         _require_non_negative_decimal(self.total_value, "total_value")
         if not self.timestamp or not self.timestamp.strip():
-            raise TransactionError("timestamp must be a non-empty ISO-8601 string")
+            raise TransactionValidationError("timestamp must be a non-empty ISO-8601 string")
         if not self.bot_name or not self.bot_name.strip():
-            raise TransactionError("bot_name must be a non-empty string")
+            raise TransactionValidationError("bot_name must be a non-empty string")
 
     @classmethod
     def create_buy(
