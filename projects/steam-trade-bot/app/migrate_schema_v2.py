@@ -88,30 +88,33 @@ def _migrate_transactions(cursor: sqlite3.Cursor) -> None:
 
 
 def _migrate_acquisition_lots(cursor: sqlite3.Cursor) -> None:
-    """Add Phase 2 columns to acquisition_lots table."""
-    # Check if already migrated
+    """Add Phase 2 and Phase 3D columns to acquisition_lots table.
+
+    Idempotent: every required column is added only when absent. The
+    Phase 3D evidence columns are checked independently of the Phase 2
+    columns, because a database may already carry the Phase 2 columns
+    while still lacking provenance/source_type/external_ref.
+    """
     cursor.execute("PRAGMA table_info(acquisition_lots)")
     cols = {row[1] for row in cursor.fetchall()}
-    
-    # If all new columns exist, skip migration
-    required_cols = {'source_transaction_id', 'bot_name', 'original_quantity'}
-    if required_cols.issubset(cols):
-        print("  acquisition_lots table already migrated")
-        return
 
-    # Add missing columns
-    migrations = [
-        ("source_transaction_id", "INTEGER"),
-        ("bot_name", "TEXT"),
-        ("original_quantity", "INTEGER"),
-    ]
+    added = []
 
-    for col_name, col_type in migrations:
+    # Phase 2 columns
+    phase2_cols = {
+        "source_transaction_id": "INTEGER",
+        "bot_name": "TEXT",
+        "original_quantity": "INTEGER",
+    }
+    for col_name, col_type in phase2_cols.items():
         if col_name not in cols:
-            cursor.execute(f"ALTER TABLE acquisition_lots ADD COLUMN {col_name} {col_type}")
-            print(f"  Added column: acquisition_lots.{col_name}")
+            cursor.execute(
+                f"ALTER TABLE acquisition_lots ADD COLUMN {col_name} {col_type}"
+            )
+            added.append(col_name)
 
-    # Phase 3D: add evidence columns if not present
+    # Phase 3D evidence columns (checked independently; never skipped
+    # just because Phase 2 columns are already present).
     phase3d_cols = {
         "provenance": "TEXT",
         "source_type": "TEXT",
@@ -119,13 +122,23 @@ def _migrate_acquisition_lots(cursor: sqlite3.Cursor) -> None:
     }
     for col_name, col_type in phase3d_cols.items():
         if col_name not in cols:
-            cursor.execute(f"ALTER TABLE acquisition_lots ADD COLUMN {col_name} {col_type}")
+            cursor.execute(
+                f"ALTER TABLE acquisition_lots ADD COLUMN {col_name} {col_type}"
+            )
+            added.append(col_name)
+
+    if added:
+        for col_name in added:
             print(f"  Added column: acquisition_lots.{col_name}")
+    else:
+        print("  acquisition_lots table already migrated")
 
     # Recreate index
     cursor.execute("DROP INDEX IF EXISTS idx_acq_lots_source_tx")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_acq_lots_source_tx ON acquisition_lots(source_transaction_id)")
-    print("  Migrated acquisition_lots table")
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_acq_lots_source_tx "
+        "ON acquisition_lots(source_transaction_id)"
+    )
 
 
 def _ensure_processing_log(cursor: sqlite3.Cursor) -> None:
