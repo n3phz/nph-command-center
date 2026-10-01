@@ -146,15 +146,25 @@ class AcquisitionDetector:
         50: "JOD",
     }
 
-    def __init__(self, repository: Repository, bot_name: str):
+    def __init__(
+        self,
+        repository: Repository,
+        bot_name: str,
+        account_steamid: str = "",
+    ):
         """Initialize detector for a specific bot.
 
         Args:
             repository: Database repository with inventory snapshot access.
             bot_name: Bot name to detect acquisitions for.
+            account_steamid: SteamID64 of the account that owns ``bot_name``.
+                Required for the Market History classifier to attribute a BUY.
+                Left empty, events classify as UNKNOWN and acquisitions stay
+                UNKNOWN, which is the safe fallback.
         """
         self.repository = repository
         self.bot_name = bot_name
+        self.account_steamid = (account_steamid or "").strip()
         self._processed_snapshot_ids: set[int] = set()
 
     def load_processed_snapshots(self) -> set[int]:
@@ -345,11 +355,15 @@ class AcquisitionDetector:
                 if not raw_data.get("success"):
                     break
 
-                # Parse events using existing parser
+                # Parse events using existing parser.
+                # The account SteamID must be the real owner: the BUY
+                # classifier requires actor == purchaser == account_steamid
+                # and refuses to classify when it is empty, which would
+                # silently drop every genuine purchase back to UNKNOWN.
                 from steam_market_history_json import adapt_response
                 normalized_events, errors = adapt_response(
                     raw_data,
-                    account_steamid="",  # Will be filled by classifier
+                    account_steamid=self.account_steamid,
                 )
 
                 for event in normalized_events:

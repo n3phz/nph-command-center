@@ -49,6 +49,31 @@ BOT_NAMES = [
     "cesarpereira27",
 ]
 
+
+def _parse_bot_steamids(raw: str) -> dict:
+    """Parse BOT_STEAMIDS into a bot_name -> SteamID64 mapping.
+
+    Format: "BotA=76561198000000001,BotB=76561198000000002"
+    Unparseable entries are ignored so a typo degrades to safe UNKNOWN
+    behavior rather than breaking acquisition detection.
+    """
+    mapping = {}
+    for entry in (raw or "").split(","):
+        entry = entry.strip()
+        if not entry or "=" not in entry:
+            continue
+        name, _, steamid = entry.partition("=")
+        name = name.strip()
+        steamid = steamid.strip()
+        if name and steamid:
+            mapping[name] = steamid
+    return mapping
+
+
+# SteamID64 of the account owning each bot. Required for the Market History
+# classifier to attribute BUY events; without it acquisitions stay UNKNOWN.
+BOT_STEAMIDS = _parse_bot_steamids(os.getenv("BOT_STEAMIDS", ""))
+
 MARKET_CACHE_SECONDS = int(
     os.getenv(
         "MARKET_CACHE_SECONDS",
@@ -640,7 +665,11 @@ def _run_acquisition_detection(bot_name: str, snapshot_id: int) -> None:
     from acquisition import Repository
 
     repo = Repository(get_db())
-    detector = AcquisitionDetector(repo, bot_name)
+    detector = AcquisitionDetector(
+        repo,
+        bot_name,
+        BOT_STEAMIDS.get(bot_name, ""),
+    )
 
     # Process the new snapshot
     results = detector.detect_acquisition(session, process_new_snapshots=True)
