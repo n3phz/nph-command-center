@@ -1,0 +1,350 @@
+/**
+ * NPH Command Center - Metric Card Styles
+ */
+
+.metric-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--status-healthy);
+}
+
+.metric-card.status-watch::before {
+  background: var(--status-warning);
+}
+
+.metric-card.status-warning::before {
+  background: var(--status-warning);
+}
+
+.metric-card.status-critical::before {
+  background: var(--status-critical);
+}
+
+.metric-card.status-unknown::before {
+  background: var(--status-unknown);
+}
+
+.metric-card:hover {
+  border-color: var(--border-secondary);
+  box-shadow: var(--shadow-md);
+}
+
+.metric-card.clickable {
+  cursor: pointer;
+}
+
+.metric-card.clickable:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.metric-card.clickable:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.metric-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xs);
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.metric-status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.metric-value-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-xs);
+}
+
+.metric-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  line-height: 1.2;
+}
+
+.metric-unit {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.metric-trend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  font-size: 0.75rem;
+}
+
+.metric-trend.trend-up {
+  background: rgba(76, 175, 80, 0.15);
+  color: var(--status-healthy);
+}
+
+.metric-trend.trend-down {
+  background: rgba(244, 67, 54, 0.15);
+  color: var(--status-critical);
+}
+
+.metric-trend.trend-stable {
+  background: rgba(33, 150, 243, 0.15);
+  color: var(--accent-primary);
+}
+
+.metric-description {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--spacing-xs);
+  border-top: 1px solid var(--border-primary);
+  font-size: 0.625rem;
+  color: var(--text-muted);
+}
+
+.metric-last-updated {
+  font-family: var(--font-mono);
+}
+
+.metric-source {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Skeleton loading */
+.metric-card.skeleton {
+  pointer-events: none;
+}
+
+.metric-card.skeleton .metric-label,
+.metric-card.skeleton .metric-value,
+.metric-card.skeleton .metric-unit,
+.metric-card.skeleton .metric-description,
+.metric-card.skeleton .metric-meta {
+  background: var(--bg-tertiary);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.metric-card.skeleton .metric-label {
+  height: 12px;
+  width: 60%;
+  border-radius: var(--radius-sm);
+}
+
+.metric-card.skeleton .metric-value {
+  height: 32px;
+  width: 50%;
+  border-radius: var(--radius-sm);
+}
+
+.metric-card.skeleton .metric-unit {
+  height: 16px;
+  width: 30%;
+  border-radius: var(--radius-sm);
+}
+
+.metric-card.skeleton .metric-description {
+  height: 12px;
+  width: 80%;
+  border-radius: var(--radius-sm);
+}
+
+.metric-card.skeleton .metric-meta {
+  height: 12px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* Live state indicators */
+.live-connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-healthy);
+  animation: livePulse 2s infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--status-healthy); }
+  50% { opacity: 0.5; box-shadow: 0 0 8px var(--status-healthy); }
+}
+
+.metric-live-progress {
+  margin-bottom: var(--spacing-xs);
+}
+
+.metric-live-progress .progress-bar {
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  position: relative;
+}
+
+.metric-live-progress .progress-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  transition: width 0.3s ease;
+}
+
+.metric-live-progress .progress-fill.live-progress {
+  animation: progressFlow 1.5s linear infinite;
+  background-size: 200% 100%;
+  background-image: linear-gradient(90deg, var(--accent-primary), var(--status-healthy), var(--accent-primary));
+}
+
+.metric-live-progress .progress-fill.live-success {
+  background: var(--status-healthy);
+}
+
+.metric-live-progress .progress-fill.live-failed {
+  background: var(--status-critical);
+}
+
+.metric-live-progress .progress-fill.live-retrying {
+  background: linear-gradient(90deg, var(--status-warning), var(--accent-primary));
+  animation: progressFlow 1s linear infinite;
+  background-size: 200% 100%;
+}
+
+.metric-live-progress .progress-fill.live-fallback {
+  background: linear-gradient(90deg, #9c27b0, var(--accent-primary));
+  animation: progressFlow 2s linear infinite;
+  background-size: 200% 100%;
+}
+
+.metric-live-progress .progress-pulse {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  animation: pulseShine 1.5s ease-in-out infinite;
+}
+
+@keyframes pulseShine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes progressFlow {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.metric-live-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--spacing-xs);
+}
+
+.metric-live-state.live-queued {
+  background: rgba(158, 158, 158, 0.2);
+  color: var(--status-unknown);
+}
+
+.metric-live-state.live-working {
+  background: rgba(33, 150, 243, 0.2);
+  color: var(--accent-primary);
+  animation: livePulse 2s infinite;
+}
+
+.metric-live-state.live-progress {
+  background: rgba(33, 150, 243, 0.3);
+  color: var(--accent-primary);
+  animation: livePulse 1s infinite;
+}
+
+.metric-live-state.live-success {
+  background: rgba(76, 175, 80, 0.2);
+  color: var(--status-healthy);
+}
+
+.metric-live-state.live-failed {
+  background: rgba(244, 67, 54, 0.2);
+  color: var(--status-critical);
+}
+
+.metric-live-state.live-retrying {
+  background: rgba(255, 193, 7, 0.2);
+  color: var(--status-warning);
+  animation: livePulse 1s infinite;
+}
+
+.metric-live-state.live-fallback {
+  background: rgba(156, 39, 176, 0.2);
+  color: #9c27b0;
+  animation: livePulse 1.5s infinite;
+}
+
+.live-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: livePulse 1s infinite;
+}
+
+.metric-last-updated.live {
+  color: var(--accent-primary);
+}
+
+.metric-event-count {
+  font-family: var(--font-mono);
+  color: var(--status-healthy);
+}

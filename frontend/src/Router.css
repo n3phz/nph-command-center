@@ -1,0 +1,35 @@
+/**
+ * NPH Command Center - Route Skeleton Styles
+ */
+
+.page-skeleton {
+  padding: var(--spacing-lg);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.skeleton-header {
+  height: 40px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-lg);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.skeleton-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.skeleton-card {
+  height: 200px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-lg);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}

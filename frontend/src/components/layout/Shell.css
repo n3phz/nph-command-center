@@ -1,0 +1,59 @@
+/**
+ * NPH Command Center - Shell Styles
+ * 
+ * Main layout container with responsive behavior.
+ */
+
+.shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  transition: margin-left var(--transition-fast);
+}
+
+.shell-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  transition: margin-left var(--transition-fast);
+}
+
+.shell-content {
+  flex: 1;
+  padding: var(--spacing-lg);
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Responsive breakpoints */
+@media (max-width: 1024px) {
+  .shell-main {
+    margin-left: 0 !important;
+  }
+  
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  
+  .sidebar:not(.open) {
+    transform: translateX(-100%);
+  }
+}
+
+@media (max-width: 768px) {
+  .shell-content {
+    padding: var(--spacing-md);
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .shell,
+  .shell-main,
+  .sidebar {
+    transition: none;
+  }
+}

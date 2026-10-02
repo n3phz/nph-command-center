@@ -1,0 +1,99 @@
+/**
+ * NPH Command Center - Project Inventory Styles
+ */
+
+.project-inventory {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+
+.project-inventory.empty {
+  min-height: 200px;
+}
+
+.project-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-primary);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.summary-item {
+  color: var(--text-secondary);
+}
+
+.summary-item.active {
+  color: var(--status-healthy);
+}
+
+.summary-item.deployed {
+  color: var(--accent-primary);
+}
+
+.summary-item.development {
+  color: var(--status-warning);
+}
+
+.summary-item.attention {
+  color: var(--status-critical);
+}
+
+.summary-item.total {
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+}
+
+.inventory-footer {
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xl);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.empty-state svg {
+  opacity: 0.5;
+}
+
+.empty-state span {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.empty-state p {
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .project-grid {
+    grid-template-columns: 1fr;
+  }
+}

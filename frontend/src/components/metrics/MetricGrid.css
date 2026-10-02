@@ -1,0 +1,54 @@
+/**
+ * NPH Command Center - Metric Grid Styles
+ */
+
+.metric-grid {
+  display: grid;
+  gap: var(--spacing-md);
+  width: 100%;
+}
+
+.metric-grid.empty {
+  min-height: 120px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xl);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-primary);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.empty-state svg {
+  opacity: 0.5;
+}
+
+.empty-state span {
+  font-size: 0.875rem;
+}
+
+/* Responsive grid */
+@media (max-width: 1280px) {
+  .metric-grid[style*="repeat(4"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .metric-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .metric-grid {
+    gap: var(--spacing-sm);
+  }
+}

@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: arr-control-backend:latest
+    container_name: arr-control-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - arr-control-data:/data
+    environment:
+      - DATABASE_URL=sqlite:////data/arr-control.db
+      - APP_NAME=arr-control
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - SONARR_URL=http://sonarr:8989
+      - RADARR_URL=http://radarr:7878
+      - QBITTORRENT_URL=http://qbittorrent:8080
+      - PROWLARR_URL=http://prowlarr:9696
+    restart: unless-stopped
+    networks:
+      - arr-control-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    image: arr-control-frontend:latest
+    container_name: arr-control-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - arr-control-network
+
+volumes:
+  arr-control-data:
+    driver: local
+
+networks:
+  arr-control-network:
+    driver: bridge

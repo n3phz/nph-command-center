@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+venv/
+__pycache__/
+.pnpm-store/
+
+# Build output
+frontend/dist/
+frontend/build/
+backend/__pycache__/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Q&A
+.qa-*
