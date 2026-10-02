@@ -82,6 +82,9 @@ def compute_unrealized_pnl(
     Raises:
         ValueError: If position is empty.
     """
+    # The lots themselves may be empty (nothing acquired) or fully consumed
+    # (nothing remaining); both are reported with the same wording so
+    # callers can rely on "empty position" as the contract.
     if position.is_empty():
         raise ValueError("cannot compute P&L for empty position")
 

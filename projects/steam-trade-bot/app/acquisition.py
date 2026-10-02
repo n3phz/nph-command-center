@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+import sqlite3
 from decimal import Decimal
 from typing import Optional
 
@@ -96,6 +97,115 @@ __all__ = [
 #: Optional Phase 3D evidence columns on acquisition_lots. Absent on
 #: databases created before Phase 3D; callers degrade gracefully.
 _PROVENANCE_COLUMNS = ("provenance", "source_type", "external_ref")
+
+#: Optional Phase 3G accounting columns on acquisition_lots. Absent on
+#: databases created before Phase 3G; callers degrade gracefully.
+_ACCOUNTING_COLUMNS = ("acquisition_fee", "all_in_cost")
+
+
+def migrate_acquisition_accounting(conn) -> None:
+    """Add the Phase 3G accounting columns to ``acquisition_lots``.
+
+    Additive and idempotent: never rewrites historical values and never
+    changes the meaning of ``unit_cost``. ``unit_cost`` continues to hold
+    the Steam price-excluding-fees basis (seller-side amount); the new
+    columns carry the acquisition fee and the all-in economic cost.
+
+    Never applied automatically against a production database; callers
+    decide when to run it.
+    """
+    existing = _existing_columns(conn, "acquisition_lots")
+    if not existing:
+        return
+    for column in _ACCOUNTING_COLUMNS:
+        if column not in existing:
+            conn.execute(
+                f"ALTER TABLE acquisition_lots ADD COLUMN {column} TEXT"
+            )
+
+
+def backfill_accounting_from_provenance(conn) -> int:
+    """Populate ``acquisition_fee``/``all_in_cost`` from stored provenance.
+
+    Uses the extended evidence keys written by Phase 3G
+    (``paid_amount_cents`` + ``paid_fee_cents``). Rows whose provenance
+    predates the fee breakdown, or whose JSON is unreadable, are left
+    untouched and reported by the return value. Nothing is rewritten.
+
+    Returns the number of rows updated.
+    """
+    if not _accounting_columns_present(conn):
+        return 0
+
+    rows = conn.execute(
+        """
+        SELECT id, provenance
+        FROM acquisition_lots
+        WHERE provenance IS NOT NULL
+          AND (acquisition_fee IS NULL OR all_in_cost IS NULL)
+        """
+    ).fetchall()
+
+    updated = 0
+    for lot_id, raw in rows:
+        provenance = _deserialize_provenance(raw)
+        if provenance is None:
+            continue
+        data = provenance.evidence_data or {}
+        paid_amount = data.get("paid_amount_cents")
+        paid_fee = data.get("paid_fee_cents")
+        if paid_amount is None or paid_fee is None:
+            continue
+        # Steam reports paid_amount/paid_fee for the ENTIRE purchase,
+        # so they divide directly by the lot's original_quantity to get
+        # the per-unit figures that align with unit_cost.
+        quantity_row = conn.execute(
+            "SELECT original_quantity FROM acquisition_lots WHERE id = ?",
+            (lot_id,),
+        ).fetchone()
+        if quantity_row is None:
+            continue
+        quantity = int(quantity_row[0] or 0)
+        if quantity <= 0:
+            continue
+        try:
+            fee_per_unit = _quantize_money(cents_to_decimal(paid_fee) / Decimal(quantity))
+            all_in_per_unit = _quantize_money(
+                cents_to_decimal(paid_amount + paid_fee) / Decimal(quantity)
+            )
+            conn.execute(
+                """
+                UPDATE acquisition_lots
+                SET acquisition_fee = ?, all_in_cost = ?
+                WHERE id = ?
+                """,
+                (str(fee_per_unit), str(all_in_per_unit), lot_id),
+            )
+        except sqlite3.Error:
+            continue
+        updated += 1
+    return updated
+
+
+def _accounting_columns_present(conn) -> bool:
+    """True when the Phase 3G accounting columns exist on the table."""
+    existing = _existing_columns(conn, "acquisition_lots")
+    return all(column in existing for column in _ACCOUNTING_COLUMNS)
+
+
+def _quantize_money(value: Decimal) -> Decimal:
+    """Round a major-unit Decimal to exactly two decimal places."""
+    return value.quantize(Decimal("0.01"))
+
+
+def cents_to_decimal(cents) -> Decimal:
+    """Convert a minor-unit (cents) amount to a major-unit Decimal.
+
+    Single canonical conversion used by every accounting write path so
+    stored monetary columns are always major units with exactly two
+    decimal places (e.g. 3 -> "0.03", 2 -> "0.02").
+    """
+    return (Decimal(cents) / Decimal(100)).quantize(Decimal("0.01"))
 
 
 def _existing_columns(conn, table: str) -> set:

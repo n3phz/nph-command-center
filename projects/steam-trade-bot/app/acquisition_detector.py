@@ -28,7 +28,15 @@ from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional, Sequence
 
-from acquisition import record_acquisition, RecordedAcquisition, AcquisitionError, Repository, _serialize_provenance
+from acquisition import (
+    record_acquisition,
+    RecordedAcquisition,
+    AcquisitionError,
+    Repository,
+    cents_to_decimal,
+    _quantize_money,
+    _serialize_provenance,
+)
 from transactions import CostStatus, SourceType, Provenance, EvidenceType
 
 
@@ -60,7 +68,15 @@ class InventoryDelta:
 
 @dataclass(frozen=True)
 class MarketHistoryPurchase:
-    """Normalized Market History purchase event with verified cost."""
+    """Normalized Market History purchase event with verified cost.
+
+    Steam's Market History reports the price *excluding* fees in
+    ``paid_amount``. The buyer actually outlays ``paid_amount +
+    paid_fee``. Verified against Steam by cross-checking the Rixqor
+    purchase against the item's live market listing, where
+    ``paid_amount`` equals the listing's ``unPrice`` and ``paid_fee``
+    equals ``unFee``.
+    """
 
     listingid: str
     purchaseid: str
@@ -70,6 +86,14 @@ class MarketHistoryPurchase:
     currencyid: int
     time_event_unix: int
     external_ref: str  # "listingid:purchaseid"
+    paid_fee_cents: int = 0
+    steam_fee_cents: int = 0
+    publisher_fee_cents: int = 0
+
+    @property
+    def buyer_total_cents(self) -> int:
+        """Total the buyer outlays: price plus all fees."""
+        return self.paid_amount_cents + self.paid_fee_cents
 
 
 @dataclass(frozen=True)
@@ -392,6 +416,9 @@ class AcquisitionDetector:
                             currencyid=event.currencyid,
                             time_event_unix=self._iso_to_unix(event.time_event),
                             external_ref=f"{event.listingid}:{event.purchaseid}",
+                            paid_fee_cents=int(event.paid_fee or 0),
+                            steam_fee_cents=int(event.steam_fee or 0),
+                            publisher_fee_cents=int(event.publisher_fee or 0),
                         ))
 
                 # Check if we've fetched all available history
@@ -888,19 +915,29 @@ class AcquisitionDetector:
         Returns:
             AcquisitionResult with updated TRACKED status.
         """
-        # Convert cents to Decimal, divided by quantity for unit cost
-        unit_cost = Decimal(purchase.paid_amount_cents) / Decimal(100) / Decimal(purchase.quantity)
+        # Steam reports paid_amount/paid_fee for the ENTIRE purchase, so
+        # they divide directly by the purchase quantity for per-unit values.
+        # quantize() keeps every stored monetary value at two decimals.
+        unit_cost = _quantize_money(
+            cents_to_decimal(purchase.paid_amount_cents) / Decimal(purchase.quantity)
+        )
 
         # Get currency code
         currency = self.CURRENCY_MAP.get(purchase.currencyid, "EUR")
 
-        # Create provenance
+        # Create provenance. Phase 3G records the full fee breakdown so
+        # the economic cost basis can be recomputed without re-reading
+        # Steam. `paid_amount` is the price-excluding-fees basis.
         provenance = Provenance(
             evidence_type=EvidenceType.STEAM_MARKET_HISTORY,
             evidence_id=purchase.purchaseid,
             evidence_data={
                 "listingid": purchase.listingid,
                 "paid_amount_cents": purchase.paid_amount_cents,
+                "paid_fee_cents": purchase.paid_fee_cents,
+                "steam_fee_cents": purchase.steam_fee_cents,
+                "publisher_fee_cents": purchase.publisher_fee_cents,
+                "buyer_total_cents": purchase.buyer_total_cents,
                 "currencyid": purchase.currencyid,
                 "timestamp_iso": datetime.fromtimestamp(
                     purchase.time_event_unix, tz=timezone.utc
@@ -910,26 +947,72 @@ class AcquisitionDetector:
 
         # Update the existing lot
         conn = self.repository.connection
-        conn.execute(
-            """
-            UPDATE acquisition_lots
-            SET cost_status = 'TRACKED',
-                unit_cost = ?,
-                source_type = ?,
-                external_ref = ?,
-                provenance = ?
-            WHERE id = ?
-            """,
-            (
-                str(unit_cost),
-                SourceType.STEAM_MARKET_PURCHASE.value,
-                purchase.external_ref,
-                _serialize_provenance(provenance),
-                lot_id,
-            ),
-        )
 
-        # Also update the source transaction with cost info
+        # unit_cost keeps its Phase 3F meaning (price excluding fees).
+        # acquisition_fee and all_in_cost are additive Phase 3G columns;
+        # they are only written when the migration has been applied.
+        lot_columns = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(acquisition_lots)"
+            ).fetchall()
+        }
+        if {"acquisition_fee", "all_in_cost"} <= lot_columns:
+            conn.execute(
+                """
+                UPDATE acquisition_lots
+                SET cost_status = 'TRACKED',
+                    unit_cost = ?,
+                    acquisition_fee = ?,
+                    all_in_cost = ?,
+                    source_type = ?,
+                    external_ref = ?,
+                    provenance = ?
+                WHERE id = ?
+                """,
+                (
+                    str(unit_cost),
+                    str(
+                        _quantize_money(
+                            cents_to_decimal(purchase.paid_fee_cents)
+                            / Decimal(purchase.quantity)
+                        )
+                    ),
+                    str(
+                        _quantize_money(
+                            cents_to_decimal(purchase.buyer_total_cents)
+                            / Decimal(purchase.quantity)
+                        )
+                    ),
+                    SourceType.STEAM_MARKET_PURCHASE.value,
+                    purchase.external_ref,
+                    _serialize_provenance(provenance),
+                    lot_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE acquisition_lots
+                SET cost_status = 'TRACKED',
+                    unit_cost = ?,
+                    source_type = ?,
+                    external_ref = ?,
+                    provenance = ?
+                WHERE id = ?
+                """,
+                (
+                    str(unit_cost),
+                    SourceType.STEAM_MARKET_PURCHASE.value,
+                    purchase.external_ref,
+                    _serialize_provenance(provenance),
+                    lot_id,
+                ),
+            )
+
+        # Also update the source transaction with cost info.
+        # Phase 3G: `fees` now carries the real acquisition fee rather
+        # than a hardcoded 0. `unit_price`/`total_value` stay on the
+        # price-excluding-fees basis to match `acquisition_lots.unit_cost`.
         conn.execute(
             """
             UPDATE transactions
@@ -941,7 +1024,7 @@ class AcquisitionDetector:
             """,
             (
                 str(unit_cost),
-                "0",
+                str(cents_to_decimal(purchase.paid_fee_cents)),
                 str(unit_cost * delta.quantity_change),
                 datetime.fromtimestamp(
                     purchase.time_event_unix, tz=timezone.utc

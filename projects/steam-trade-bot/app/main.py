@@ -304,6 +304,11 @@ def init_db():
             unit_cost TEXT,
             acquired_at TEXT NOT NULL,
             cost_status TEXT NOT NULL CHECK(cost_status IN ('TRACKED', 'UNKNOWN')),
+            provenance TEXT,
+            source_type TEXT,
+            external_ref TEXT,
+            acquisition_fee TEXT,
+            all_in_cost TEXT,
             FOREIGN KEY(source_transaction_id) REFERENCES transactions(id)
         )
         """
@@ -1147,6 +1152,67 @@ def parse_price_text(value):
         return None
 
 
+def _extract_from_listings(listings):
+    """Extract identity-bound structured prices from a listings array.
+
+    Returns the Phase 3G result dict when at least one listing carries
+    both an identity anchor (``market_hash_name``) and non-negative
+    integer ``unPrice``/``unFee`` minor-unit values; None otherwise so
+    callers fall through to the legacy patterns.
+    """
+    if not isinstance(listings, list) or not listings:
+        return None
+
+    prices = []
+    for L in listings:
+        if not isinstance(L, dict):
+            continue
+        asset = L.get('asset', {}) or {}
+        desc = L.get('description', {}) or {}
+        market_hash_name = desc.get('market_hash_name') or asset.get('market_hash_name')
+        classid = asset.get('classid') or desc.get('classid')
+        if not market_hash_name:
+            continue
+        un_price = L.get('unPrice')
+        un_fee = L.get('unFee')
+        if un_price is None or un_fee is None:
+            continue
+        try:
+            un_price_val = int(un_price)
+            un_fee_val = int(un_fee)
+        except (TypeError, ValueError):
+            continue
+        if un_price_val < 0 or un_fee_val < 0:
+            continue
+        prices.append({
+            'market_hash_name': market_hash_name,
+            'classid': classid,
+            'listingid': L.get('listingid'),
+            'un_price': un_price_val,
+            'un_fee': un_fee_val,
+            'un_steam_fee': int(L.get('unSteamFee') or 0),
+            'un_publisher_fee': int(L.get('unPublisherFee') or 0),
+            'str_subtotal': L.get('strSubtotal'),
+            'currency': L.get('eCurrency'),
+            'b_mine': L.get('bMine'),
+            'description': desc,
+            'asset': asset,
+        })
+    if not prices:
+        return None
+    return {
+        'source': 'phase3g_structured',
+        'lowest_price': None,
+        'median_price': None,
+        'volume': None,
+        'lowest_price_value': None,
+        'median_price_value': None,
+        'structured_prices': prices,
+        'success': True,
+        'error': None,
+    }
+
+
 def extract_prices_from_html(page):
     """
     Steam listing pages contain several representations of
@@ -1154,8 +1220,74 @@ def extract_prices_from_html(page):
 
     We intentionally inspect multiple known patterns rather
     than depending on a single HTML layout.
-    """
 
+    Phase 3G: the modern structured listing payload ships as a
+    double-escaped JSON array under the key ``listings``.  When
+    present it carries authoritative fields:
+
+    * ``unPrice`` -- seller proceeds per unit (minor units)
+    * ``unFee``   -- total buyer fees per unit (minor units)
+    * ``unSteamFee`` / ``unPublisherFee`` -- fee split
+    * ``strSubtotal`` -- buyer-facing total display string
+    * ``eCurrency`` -- Steam currency ID
+    * ``listingid`` -- authoritative listing ID
+    * ``bMine`` -- whether the listing belongs to the viewing account
+
+    When this structured data is present we extract it and return
+    a ``MarketPrice`` object that preserves the identity-binding
+    fields so callers can verify the price belongs to the
+    requested item.  If the structured payload is absent we fall
+    back to the legacy patterns (see below).
+    """
+    from decimal import Decimal
+
+    # --------------------------------------------------------
+    # Phase 3G: Modern structured listing payload
+    # --------------------------------------------------------
+    # Fast path: a plain JSON body with a top-level "listings"
+    # key (Market History style API responses).
+    try:
+        data = json.loads(page)
+    except (ValueError, TypeError):
+        data = None
+    if isinstance(data, dict) and isinstance(data.get("listings"), list):
+        result = _extract_from_listings(data["listings"])
+        if result is not None:
+            return result
+
+    # Slow path: the payload is JSON-embedded inside a script
+    # tag and JS-string escaped (quotes appear as \", backslashes
+    # as \\). Collapse doubled backslashes FIRST so the escape
+    # backslashes of \" survive to be stripped in the second pass.
+    un = page.replace('\\\\', '\\').replace('\\"', '"')
+    listings_idx = un.find('"listings"')
+    if listings_idx > 0:
+        # Find the array start after "listings"
+        arr_start = un.find('[', listings_idx)
+        if arr_start > 0:
+            depth = 0
+            arr_end = None
+            for k in range(arr_start, min(arr_start + 10000, len(un))):
+                if un[k] == '[':
+                    depth += 1
+                elif un[k] == ']':
+                    depth -= 1
+                    if depth == 0:
+                        arr_end = k + 1
+                        break
+            if arr_end:
+                raw = un[arr_start:arr_end]
+                try:
+                    listings = json.loads(raw)
+                except (ValueError, TypeError):
+                    listings = None
+                result = _extract_from_listings(listings)
+                if result is not None:
+                    return result
+
+    # --------------------------------------------------------
+    # Legacy patterns (unchanged)
+    # --------------------------------------------------------
     lowest_text = None
     lowest_value = None
 

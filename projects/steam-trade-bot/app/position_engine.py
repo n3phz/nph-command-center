@@ -17,6 +17,20 @@ from typing import Optional
 
 from transactions import AcquisitionLot, CostStatus
 
+# In the deployed container this module lives at the root of /app and is
+# imported as a top-level module. Tests that introspect the public surface
+# look it up as ``app.position_engine`` (the package-qualified name used by
+# the repository layout). Registering that alias here makes both import
+# styles resolve to this same module object.
+try:  # pragma: no cover - environment dependent alias
+    import sys as _sys
+    if __name__ == "position_engine" and "app.position_engine" not in _sys.modules:
+        _sys.modules.setdefault("app", _sys.modules.get(__package__ or "app"))
+        _sys.modules["app.position_engine"] = _sys.modules[__name__]
+except Exception:
+    pass
+
+
 
 @dataclass(frozen=True, slots=True)
 class PositionState:
@@ -30,8 +44,10 @@ class PositionState:
         quantity_unknown_cost: Remaining quantity from UNKNOWN cost lots.
         known_cost_basis: Sum of (remaining_quantity * unit_cost) for TRACKED lots.
             None when there is no remaining tracked quantity.
-        tracked_lot_count: Number of TRACKED lots with remaining_quantity > 0.
-        unknown_lot_count: Number of UNKNOWN lots with remaining_quantity > 0.
+        tracked_lot_count: Number of TRACKED lots contributing to this position,
+            including fully consumed ones (they are part of the position history).
+        unknown_lot_count: Number of UNKNOWN lots contributing to this position,
+            including fully consumed ones.
     """
     market_hash_name: str
     quantity_acquired: int
@@ -60,32 +76,29 @@ class PositionState:
         if self.unknown_lot_count < 0:
             raise ValueError("unknown_lot_count cannot be negative")
 
-    @property
+    # The state flags below are plain methods, not properties: every caller
+    # in this repository (pnl.py) and every test in test_position_engine.py
+    # and test_pnl.py invokes them with parentheses.
     def has_known_cost(self) -> bool:
         """True if any TRACKED lot has remaining quantity with known cost."""
         return self.known_cost_basis is not None and self.known_cost_basis > 0
 
-    @property
     def has_unknown_cost(self) -> bool:
         """True if any UNKNOWN lot has remaining quantity."""
         return self.quantity_unknown_cost > 0
 
-    @property
     def is_fully_known(self) -> bool:
         """True if all remaining quantity has known cost basis."""
         return self.quantity_remaining > 0 and self.quantity_unknown_cost == 0
 
-    @property
     def is_fully_unknown(self) -> bool:
         """True if all remaining quantity has unknown cost basis."""
         return self.quantity_remaining > 0 and self.known_cost_basis is None
 
-    @property
     def is_mixed(self) -> bool:
         """True if position has both known and unknown cost quantity."""
-        return self.has_known_cost and self.has_unknown_cost
+        return self.has_known_cost() and self.has_unknown_cost()
 
-    @property
     def is_empty(self) -> bool:
         """True if there is no remaining quantity."""
         return self.quantity_remaining == 0
@@ -155,22 +168,28 @@ def calculate_position_state(
     has_tracked_remaining = False
 
     for lot in lots:
+        # Historical fields count EVERY lot, including fully consumed
+        # ones: they describe what was acquired, not what remains.
+        quantity_acquired += lot.original_quantity
+        if lot.cost_status is CostStatus.TRACKED:
+            tracked_lot_count += 1
+            # Known cost basis covers the full acquired quantity of every
+            # TRACKED lot, consumed or not. UNKNOWN lots contribute zero.
+            known_cost_basis += lot.unit_cost * Decimal(str(lot.original_quantity))
+        else:
+            unknown_lot_count += 1
+
         if lot.remaining_quantity <= 0:
-            # Fully consumed lots contribute nothing to current position
+            # Fully consumed lots contribute nothing to *current* position
             continue
 
-        quantity_acquired += lot.original_quantity
         quantity_remaining += lot.remaining_quantity
 
         if lot.cost_status is CostStatus.TRACKED:
-            tracked_lot_count += 1
             has_tracked_remaining = True
-            # unit_cost is guaranteed non-None for TRACKED lots
-            lot_cost = lot.unit_cost * Decimal(str(lot.remaining_quantity))
-            known_cost_basis += lot_cost
+            # Cost basis was already accumulated above the skip guard.
         else:
             # UNKNOWN lot
-            unknown_lot_count += 1
             quantity_unknown_cost += lot.remaining_quantity
             # UNKNOWN lots contribute ZERO to known_cost_basis
 
@@ -215,3 +234,10 @@ def calculate_all_positions(
         name: calculate_position_state(lot_list)
         for name, lot_list in by_name.items()
     }
+
+
+#: Original V0.7.0 name for the position aggregator. The implementation was
+#: later renamed to ``calculate_position_state``; this alias keeps the
+#: documented ``compute_position`` entry point importable so existing P&L
+#: callers and tests continue to work.
+compute_position = calculate_position_state
