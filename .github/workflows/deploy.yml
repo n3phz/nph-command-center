@@ -1,4 +1,4 @@
-name: Deploy to pre35
+name: Verify
 
 on:
   push:
@@ -7,77 +7,63 @@ on:
 
 jobs:
   build-frontend:
+    name: Frontend build (tsc + vite)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
-      
+
       - name: Install dependencies
         run: cd frontend && npm ci
-      
-      - name: Build frontend
+
+      - name: Type check and build
         run: cd frontend && npm run build
-      
+
       - name: Upload frontend artifacts
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: frontend/dist/
-          retention-days: 1
+          retention-days: 7
 
   build-backend:
+    name: Backend import check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install dependencies
         run: |
           cd backend
-          pip install -r requirements.txt 2>/dev/null || pip install fastapi uvicorn pydantic pydantic-settings sqlalchemy
-      
+          pip install -r requirements.txt
+
+      - name: Verify app imports and routes resolve
+        working-directory: backend
+        run: |
+          python -c "
+          from backend.main import create_application
+          app = create_application()
+          paths = sorted(r.path for r in app.routes if hasattr(r, 'path'))
+          print('route count:', len(paths))
+          for p in paths:
+              if p.startswith('/api/system') or p in ('/api/services','/api/hosts','/api/storage','/api/ai/command-center','/api/projects','/api/alerts','/api/activity','/api/quick-actions','/api/search','/api/infrastructure/snapshot'):
+                  print('  OK', p)
+          "
+
       - name: Upload backend code
         uses: actions/upload-artifact@v4
         with:
           name: backend-code
           path: backend/
-          retention-days: 1
-
-  deploy:
-    needs: [build-frontend, build-backend]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Download frontend artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist/
-      
-      - name: Download backend code
-        uses: actions/download-artifact@v4
-        with:
-          name: backend-code
-          path: backend/
-      
-      - name: Deploy to Dokploy
-        env:
-          DOKPLOY_API_URL: ${{ secrets.DOKPLOY_API_URL }}
-          DOKPLOY_API_TOKEN: ${{ secrets.DOKPLOY_API_TOKEN }}
-        run: |
-          echo "Deploying to Dokploy..."
-          # This would use the Dokploy API to trigger a deployment
-          # For now, just echo the status
-          echo "Frontend artifacts: $(ls -la frontend/dist/ | wc -l) files"
-          echo "Backend code: $(ls -la backend/ | wc -l) files"
-          echo "Deployment would happen here via Dokploy API"
+          retention-days: 7
