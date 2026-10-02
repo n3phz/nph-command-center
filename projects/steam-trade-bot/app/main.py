@@ -17,6 +17,14 @@ from steam_web_session import (
     SteamWebSessionStatus,
 )
 
+from market_opportunity_scanner import (
+    MarketOpportunityScanner,
+    StructuredMarketPrice,
+    AcquisitionCost,
+    OpportunityClassification,
+    LiquidityEvidence,
+)
+
 
 # ============================================================
 # CONFIGURATION
@@ -5599,4 +5607,143 @@ def database():
                 "source" in market_columns
             ),
         },
+    }
+
+
+# ============================================================
+# MARKET OPPORTUNITY SCANNER
+# ============================================================
+
+@app.get("/opportunities/scanner/{bot_name}")
+def opportunities_scanner(bot_name: str):
+    """
+    Read-only market opportunity scanner.
+
+    Identifies Steam Market items that may represent profitable
+    manual purchase opportunities for later resale.
+
+    This endpoint is READ-ONLY:
+    - No database writes
+    - No Steam Market write operations
+    - No trade execution
+    - No automatic buying or selling
+    """
+    conn = get_db()
+
+    # Get latest inventory for bot
+    rows = get_latest_items(conn, bot_name)
+    snapshot_id = get_latest_snapshot_id(conn, bot_name)
+    conn.close()
+
+    if not rows:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "error",
+                "bot": bot_name,
+                "error": "No inventory snapshot found.",
+            },
+        )
+
+    # Create scanner
+    scanner = MarketOpportunityScanner(
+        db_path=DB_PATH,
+        steam_app_id=STEAM_APP_ID,
+    )
+
+    # Build opportunities from inventory
+    opportunities = []
+    for row in rows:
+        market_hash_name = row[5]
+        if not market_hash_name:
+            continue
+
+        appid = row[1] or STEAM_APP_ID
+        classid = row[2]
+        assetid = row[1]  # asset_id
+        amount = row[4]
+        tradable = bool(row[8])
+        marketable = bool(row[9])
+
+        # Get acquisition cost from database
+        acquisition_cost = scanner.get_accounting_cost(
+            market_hash_name, bot_name
+        )
+
+        # Get market price (cached or fresh)
+        market_price_data = get_cached_market_price(market_hash_name)
+        structured_price = None
+        if market_price_data and market_price_data.get("structured_prices"):
+            for sp in market_price_data["structured_prices"]:
+                if sp.get("market_hash_name") == market_hash_name:
+                    structured_price = StructuredMarketPrice(
+                        un_price=sp["un_price"],
+                        un_fee=sp["un_fee"],
+                        un_steam_fee=sp.get("un_steam_fee", 0),
+                        un_publisher_fee=sp.get("un_publisher_fee", 0),
+                        str_subtotal=sp.get("str_subtotal"),
+                        e_currency=sp.get("e_currency", STEAM_CURRENCY),
+                        listingid=sp.get("listingid"),
+                        b_mine=sp.get("b_mine", False),
+                        market_hash_name=sp["market_hash_name"],
+                        classid=sp.get("classid"),
+                    )
+                    break
+
+        # Get liquidity data
+        liquidity = {
+            "active_listing_count": market_price_data.get("volume") if market_price_data else None,
+            "available_quantity": amount,
+        }
+
+        # Scan opportunity
+        opportunity = scanner.scan_item(
+            market_hash_name=market_hash_name,
+            appid=appid,
+            classid=classid,
+            assetid=assetid,
+            quantity=amount,
+            marketable=marketable,
+            tradable=tradable,
+            acquisition_cost=acquisition_cost,
+            market_price=structured_price,
+            liquidity=liquidity,
+        )
+
+        opportunities.append({
+            "market_hash_name": opportunity.market_hash_name,
+            "appid": opportunity.appid,
+            "classid": opportunity.classid,
+            "assetid": opportunity.assetid,
+            "quantity": opportunity.quantity,
+            "marketable": opportunity.marketable,
+            "tradable": opportunity.tradable,
+            "expected_profit": float(opportunity.expected_profit) if opportunity.expected_profit is not None else None,
+            "profit_margin": float(opportunity.profit_margin) if opportunity.profit_margin is not None else None,
+            "seller_proceeds": float(opportunity.seller_proceeds) if opportunity.seller_proceeds is not None else None,
+            "all_in_cost": float(opportunity.all_in_cost) if opportunity.all_in_cost is not None else None,
+            "identity_verified": opportunity.identity_verified,
+            "marketability_verified": opportunity.marketability_verified,
+            "seller_proceeds_verified": opportunity.seller_proceeds_verified,
+            "acquisition_cost_verified": opportunity.acquisition_cost_verified,
+            "liquidity_evidence": opportunity.liquidity_evidence,
+            "classification": opportunity.classification.value,
+            "confidence": opportunity.confidence,
+            "reason": opportunity.reason,
+            "timestamp": opportunity.timestamp,
+            "data_sources": opportunity.data_sources,
+        })
+
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "bot": bot_name,
+        "snapshot_id": snapshot_id,
+        "read_only": True,
+        "execution": {
+            "enabled": False,
+            "mode": "read-only",
+        },
+        "opportunity_count": len(opportunities),
+        "opportunities": opportunities,
     }
