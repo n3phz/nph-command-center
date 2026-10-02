@@ -417,9 +417,9 @@ class MarketOpportunityScanner:
 
         if not acquisition_cost_verified:
             return (
-                OpportunityClassification.POTENTIALLY_PROFITABLE,
-                "MEDIUM",
-                "Acquisition cost not fully verified; cannot calculate profit.",
+                OpportunityClassification.UNVERIFIED,
+                "LOW",
+                "Acquisition cost not verified; cannot establish profitability.",
             )
 
         # Have all evidence — calculate profit

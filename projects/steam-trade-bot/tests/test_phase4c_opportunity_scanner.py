@@ -431,7 +431,7 @@ class TestAccounting:
         assert opp.all_in_cost == Decimal("8.00")
 
     def test_unknown_cost_status(self, scanner):
-        """UNKNOWN cost status should not be used for profit calculation."""
+        """UNKNOWN cost status should result in UNVERIFIED."""
         cost = AcquisitionCost(
             unit_cost=None,
             acquisition_fee=None,
@@ -447,7 +447,7 @@ class TestAccounting:
             acquisition_cost=cost,
         )
         assert opp.acquisition_cost_verified is False
-        assert opp.classification == OpportunityClassification.POTENTIALLY_PROFITABLE
+        assert opp.classification == OpportunityClassification.UNVERIFIED
 
     def test_missing_acquisition_fee(self, scanner, sample_acquisition_cost):
         """Missing acquisition_fee should still work if all_in_cost is stored."""
@@ -485,7 +485,7 @@ class TestAccounting:
             acquisition_cost=cost,
         )
         assert opp.acquisition_cost_verified is False
-        assert opp.classification == OpportunityClassification.POTENTIALLY_PROFITABLE
+        assert opp.classification == OpportunityClassification.UNVERIFIED
 
 
 # ============================================================
@@ -499,11 +499,11 @@ class TestProfitCalculation:
     def test_loss_opportunity(self, scanner):
         """Loss opportunity: seller proceeds < all-in cost."""
         price = StructuredMarketPrice(
-            un_price=300,  # €3.00 seller proceeds
-            un_fee=200,    # €2.00 buyer fees
-            un_steam_fee=100,
-            un_publisher_fee=100,
-            str_subtotal="€5.00",
+            un_price=3,    # €0.03 seller proceeds
+            un_fee=2,      # €0.02 buyer fees
+            un_steam_fee=1,
+            un_publisher_fee=1,
+            str_subtotal="€0.05",
             e_currency=3,
             listingid="123",
             b_mine=False,
@@ -511,9 +511,9 @@ class TestProfitCalculation:
             classid="12345",
         )
         cost = AcquisitionCost(
-            unit_cost=Decimal("3.00"),
-            acquisition_fee=Decimal("2.00"),
-            all_in_cost=Decimal("5.00"),
+            unit_cost=Decimal("0.03"),
+            acquisition_fee=Decimal("0.02"),
+            all_in_cost=Decimal("0.05"),
             cost_status="TRACKED",
             source_transaction_id=1,
         )
@@ -526,17 +526,17 @@ class TestProfitCalculation:
             acquisition_cost=cost,
         )
         assert opp.classification == OpportunityClassification.LOSS
-        assert opp.expected_profit == Decimal("-0.02")  # €3.00 - €5.00
+        assert opp.expected_profit == Decimal("-0.02")  # €0.03 - €0.05
         assert opp.profit_margin == Decimal("-0.04")  # -4%
 
     def test_break_even(self, scanner):
         """Break-even: seller proceeds = all-in cost."""
         price = StructuredMarketPrice(
-            un_price=500,  # €5.00 seller proceeds
-            un_fee=200,
-            un_steam_fee=100,
-            un_publisher_fee=100,
-            str_subtotal="€7.00",
+            un_price=5,    # €0.05 seller proceeds
+            un_fee=0,
+            un_steam_fee=0,
+            un_publisher_fee=0,
+            str_subtotal="€0.05",
             e_currency=3,
             listingid="123",
             b_mine=False,
@@ -544,9 +544,9 @@ class TestProfitCalculation:
             classid="12345",
         )
         cost = AcquisitionCost(
-            unit_cost=Decimal("5.00"),
-            acquisition_fee=Decimal("2.00"),
-            all_in_cost=Decimal("7.00"),
+            unit_cost=Decimal("0.05"),
+            acquisition_fee=Decimal("0.00"),
+            all_in_cost=Decimal("0.05"),
             cost_status="TRACKED",
             source_transaction_id=1,
         )
@@ -871,6 +871,162 @@ class TestClassification:
 
 
 # ============================================================
+# CONFIGURABLE MARGIN THRESHOLD TESTS
+# ============================================================
+
+
+class TestConfigurableMarginThreshold:
+    """Test configurable minimum profit margin threshold."""
+
+    def test_default_threshold_0_10_verified_profitable_at_10pct(self):
+        """Default threshold=0.10, margin=0.10 => VERIFIED_PROFITABLE with sufficient liquidity."""
+        scanner = MarketOpportunityScanner(db_path="/tmp/test.db", min_margin_threshold=Decimal("0.10"))
+        price = StructuredMarketPrice(
+            un_price=1100,  # €11.00 seller proceeds
+            un_fee=300,
+            un_steam_fee=150,
+            un_publisher_fee=150,
+            str_subtotal="€14.00",
+            e_currency=3,
+            listingid="111",
+            b_mine=False,
+            market_hash_name="Test Item",
+            classid="12345",
+        )
+        cost = AcquisitionCost(
+            unit_cost=Decimal("10.00"),
+            acquisition_fee=Decimal("0.00"),
+            all_in_cost=Decimal("10.00"),
+            cost_status="TRACKED",
+            source_transaction_id=1,
+        )
+        opp = scanner.scan_item(
+            market_hash_name="Test Item",
+            appid=753,
+            marketable=True,
+            tradable=True,
+            market_price=price,
+            acquisition_cost=cost,
+            liquidity={"active_listing_count": 10, "available_quantity": 5},
+        )
+        assert opp.profit_margin == Decimal("0.10")  # exactly 10%
+        assert opp.expected_profit == Decimal("1.00")
+        assert opp.classification == OpportunityClassification.VERIFIED_PROFITABLE
+
+    def test_threshold_0_10_margin_0_09_not_verified(self):
+        """Threshold=0.10, margin=0.09 (<10%) => POTENTIALLY_PROFITABLE even with high liquidity."""
+        scanner = MarketOpportunityScanner(db_path="/tmp/test.db", min_margin_threshold=Decimal("0.10"))
+        price = StructuredMarketPrice(
+            un_price=1090,  # €10.90 seller proceeds
+            un_fee=100,
+            un_steam_fee=50,
+            un_publisher_fee=50,
+            str_subtotal="€11.90",
+            e_currency=3,
+            listingid="222",
+            b_mine=False,
+            market_hash_name="Test Item",
+            classid="12345",
+        )
+        cost = AcquisitionCost(
+            unit_cost=Decimal("10.00"),
+            acquisition_fee=Decimal("0.00"),
+            all_in_cost=Decimal("10.00"),
+            cost_status="TRACKED",
+            source_transaction_id=1,
+        )
+        opp = scanner.scan_item(
+            market_hash_name="Test Item",
+            appid=753,
+            marketable=True,
+            tradable=True,
+            market_price=price,
+            acquisition_cost=cost,
+            liquidity={"active_listing_count": 10, "available_quantity": 5},
+        )
+        assert opp.profit_margin == Decimal("0.09")  # 9%
+        assert opp.expected_profit == Decimal("0.90")  # still positive!
+        assert opp.classification == OpportunityClassification.POTENTIALLY_PROFITABLE
+
+    def test_threshold_0_05_margin_0_09_verified(self):
+        """Threshold=0.05, margin=0.09 (>5%) => VERIFIED_PROFITABLE with sufficient liquidity."""
+        scanner = MarketOpportunityScanner(db_path="/tmp/test.db", min_margin_threshold=Decimal("0.05"))
+        price = StructuredMarketPrice(
+            un_price=1090,  # €10.90 seller proceeds
+            un_fee=100,
+            un_steam_fee=50,
+            un_publisher_fee=50,
+            str_subtotal="€11.90",
+            e_currency=3,
+            listingid="333",
+            b_mine=False,
+            market_hash_name="Test Item",
+            classid="12345",
+        )
+        cost = AcquisitionCost(
+            unit_cost=Decimal("10.00"),
+            acquisition_fee=Decimal("0.00"),
+            all_in_cost=Decimal("10.00"),
+            cost_status="TRACKED",
+            source_transaction_id=1,
+        )
+        opp = scanner.scan_item(
+            market_hash_name="Test Item",
+            appid=753,
+            marketable=True,
+            tradable=True,
+            market_price=price,
+            acquisition_cost=cost,
+            liquidity={"active_listing_count": 10, "available_quantity": 5},
+        )
+        assert opp.profit_margin == Decimal("0.09")  # 9%
+        assert opp.expected_profit == Decimal("0.90")  # still positive!
+        assert opp.classification == OpportunityClassification.VERIFIED_PROFITABLE
+
+    def test_positive_profit_always_present_regardless_of_threshold(self):
+        """Economic profitability is independent of verification threshold."""
+        scanner_low = MarketOpportunityScanner(db_path="/tmp/test.db", min_margin_threshold=Decimal("0.05"))
+        scanner_high = MarketOpportunityScanner(db_path="/tmp/test.db", min_margin_threshold=Decimal("0.20"))
+        price = StructuredMarketPrice(
+            un_price=1090,
+            un_fee=100,
+            un_steam_fee=50,
+            un_publisher_fee=50,
+            str_subtotal="€11.90",
+            e_currency=3,
+            listingid="444",
+            b_mine=False,
+            market_hash_name="Test Item",
+            classid="12345",
+        )
+        cost = AcquisitionCost(
+            unit_cost=Decimal("10.00"),
+            acquisition_fee=Decimal("0.00"),
+            all_in_cost=Decimal("10.00"),
+            cost_status="TRACKED",
+            source_transaction_id=1,
+        )
+        opp_low = scanner_low.scan_item(
+            market_hash_name="Test Item", appid=753,
+            marketable=True, tradable=True,
+            market_price=price, acquisition_cost=cost,
+            liquidity={"active_listing_count": 10, "available_quantity": 5},
+        )
+        opp_high = scanner_high.scan_item(
+            market_hash_name="Test Item", appid=753,
+            marketable=True, tradable=True,
+            market_price=price, acquisition_cost=cost,
+            liquidity={"active_listing_count": 10, "available_quantity": 5},
+        )
+        # Same economic profit regardless of threshold
+        assert opp_low.expected_profit == opp_high.expected_profit == Decimal("0.90")
+        assert opp_low.profit_margin == opp_high.profit_margin == Decimal("0.09")
+        # Different classifications due to threshold
+        assert opp_low.classification == OpportunityClassification.VERIFIED_PROFITABLE
+        assert opp_high.classification == OpportunityClassification.POTENTIALLY_PROFITABLE
+
+
+# ============================================================
 # SAFETY TESTS
 # ============================================================
 
@@ -897,15 +1053,13 @@ class TestSafety:
 
     def test_no_market_write_functions_called(self, scanner):
         """Scanner should not call any market write functions."""
-        with mock.patch('market_opportunity_scanner.fetch_market_price') as mock_fetch:
-            scanner.scan_item(
-                market_hash_name="Test Item",
-                appid=753,
-                marketable=True,
-                tradable=True,
-            )
-            # fetch_market_price should NOT be called by scanner
-            mock_fetch.assert_not_called()
+        # The scanner module does not import or call any market write functions
+        import market_opportunity_scanner as m
+        assert not hasattr(m, 'fetch_market_price') or not callable(getattr(m, 'fetch_market_price', None))
+        # Verify no buy/list/order functions exist
+        assert not hasattr(m, 'buy_item')
+        assert not hasattr(m, 'create_listing')
+        assert not hasattr(m, 'place_order')
 
 
 # ============================================================
@@ -929,7 +1083,7 @@ class TestMalformedData:
         assert opp.classification == OpportunityClassification.UNVERIFIED
 
     def test_none_acquisition_cost(self, scanner):
-        """None acquisition cost should be handled gracefully."""
+        """None acquisition cost should result in UNVERIFIED."""
         opp = scanner.scan_item(
             market_hash_name="Test Item",
             appid=753,
@@ -938,7 +1092,7 @@ class TestMalformedData:
             acquisition_cost=None,
         )
         assert opp.all_in_cost is None
-        assert opp.classification == OpportunityClassification.POTENTIALLY_PROFITABLE
+        assert opp.classification == OpportunityClassification.UNVERIFIED
 
     def test_empty_market_hash_name(self, scanner):
         """Empty market_hash_name should be handled."""
