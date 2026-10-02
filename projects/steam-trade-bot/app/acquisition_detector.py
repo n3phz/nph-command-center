@@ -36,6 +36,7 @@ from acquisition import (
     cents_to_decimal,
     _quantize_money,
     _serialize_provenance,
+    _deserialize_provenance,
 )
 from transactions import CostStatus, SourceType, Provenance, EvidenceType
 
@@ -89,6 +90,12 @@ class MarketHistoryPurchase:
     paid_fee_cents: int = 0
     steam_fee_cents: int = 0
     publisher_fee_cents: int = 0
+
+    # True only when Steam reported a ``paid_fee`` field for this purchase.
+    # Accounting enrichment demands authoritative fee evidence, so a missing
+    # field must leave ``acquisition_fee``/``all_in_cost`` NULL rather than be
+    # recorded as a fabricated zero.
+    fee_evidence_present: bool = False
 
     @property
     def buyer_total_cents(self) -> int:
@@ -419,6 +426,9 @@ class AcquisitionDetector:
                             paid_fee_cents=int(event.paid_fee or 0),
                             steam_fee_cents=int(event.steam_fee or 0),
                             publisher_fee_cents=int(event.publisher_fee or 0),
+                            fee_evidence_present=bool(
+                                getattr(event, "paid_fee_present", False)
+                            ),
                         ))
 
                 # Check if we've fetched all available history
@@ -894,6 +904,219 @@ class AcquisitionDetector:
 
         return results
 
+    def enrich_tracked_accounting(
+        self,
+        session,
+        lookback_days: int = 30,
+    ) -> list[AcquisitionResult]:
+        """Enrich already-TRACKED lots with authoritative acquisition fee data.
+
+        Phase 3G added ``acquisition_fee``/``all_in_cost`` to
+        ``acquisition_lots``. Lots tracked *before* that migration keep their
+        original Phase 3F provenance, which recorded ``paid_amount_cents`` but
+        not the fee split, so those two columns stay NULL forever:
+        ``reconcile_delayed_evidence`` only considers ``UNKNOWN`` lots.
+
+        This pass re-reads the ORIGINAL authoritative purchase evidence for a
+        lot that is already TRACKED and is missing its accounting columns, and
+        fills them in place. It deliberately:
+
+        * creates no transaction and no lot (in-place UPDATE only);
+        * never changes ``cost_status`` (no TRACKED -> UNKNOWN downgrade);
+        * never rewrites ``unit_cost`` (its price-excluding-fees meaning is
+          authoritative and already recorded);
+        * never touches quantity, ``source_type``, or the stored provenance's
+          existing evidence keys;
+        * never uses the *current* market listing as a substitute for the
+          historical acquisition fee -- only the original purchase record;
+        * never estimates a missing fee: without authoritative fee evidence the
+          columns stay NULL and the lot is reported as unresolved.
+
+        Args:
+            session: Authenticated Steam session (the existing Market History
+                mechanism). ``None`` means no evidence can be retrieved, so
+                the call is a no-op.
+            lookback_days: How far back to look for the original evidence.
+
+        Returns:
+            AcquisitionResult entries for lots that were actually enriched.
+        """
+        results: list[AcquisitionResult] = []
+
+        # Without a session there is no authoritative source to enrich from.
+        if session is None:
+            return results
+
+        conn = self.repository.connection
+
+        # Only meaningful when the Phase 3G migration has been applied.
+        lot_columns = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(acquisition_lots)"
+            ).fetchall()
+        }
+        if not {"acquisition_fee", "all_in_cost"} <= lot_columns:
+            return results
+
+        # Candidate lots: already TRACKED, still missing accounting data, and
+        # carrying a real Steam purchase identity in external_ref.
+        candidates = conn.execute(
+            """
+            SELECT al.id, al.source_transaction_id, al.market_hash_name,
+                   al.original_quantity, al.acquired_at, al.external_ref,
+                   al.provenance
+            FROM acquisition_lots al
+            WHERE al.cost_status = 'TRACKED'
+              AND al.bot_name = ?
+              AND (al.acquisition_fee IS NULL OR al.all_in_cost IS NULL)
+              AND al.external_ref IS NOT NULL
+              AND al.external_ref NOT LIKE 'unknown:%'
+              AND al.external_ref LIKE '%:%'
+            ORDER BY al.acquired_at DESC
+            LIMIT 100
+            """,
+            (self.bot_name,),
+        ).fetchall()
+
+        for lot_id, source_tx_id, mhn, qty, acquired_at, external_ref, raw_prov in candidates:
+            try:
+                # Only the ORIGINAL purchase evidence counts. Matching is by
+                # exact Steam purchase identity (listingid:purchaseid), never
+                # by a similar-looking current listing.
+                purchase = self._find_purchase_by_identity(
+                    mhn,
+                    external_ref,
+                    self._parse_date(acquired_at),
+                    session,
+                )
+                if purchase is None:
+                    # No authoritative record -> leave NULL, stay unresolved.
+                    continue
+
+                # Authoritative but ambiguous: Steam did not report a fee for
+                # this purchase, so we must not record a zero.
+                if not purchase.fee_evidence_present:
+                    continue
+
+                conn.execute("BEGIN")
+                try:
+                    result = self._write_accounting_enrichment(
+                        lot_id,
+                        source_tx_id,
+                        qty,
+                        purchase,
+                        raw_prov,
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+
+                results.append(result)
+
+            except Exception:
+                # A lot we cannot enrich keeps its NULL accounting fields.
+                continue
+
+        return results
+
+    def _find_purchase_by_identity(
+        self,
+        market_hash_name: str,
+        external_ref: str,
+        acquired_date: date,
+        session,
+    ) -> Optional[MarketHistoryPurchase]:
+        """Find the original purchase identified by ``external_ref``.
+
+        ``external_ref`` is Steam's own ``listingid:purchaseid`` pair for the
+        acquisition, so it is an exact identity anchor. The current market
+        listing is deliberately NOT consulted.
+        """
+        for purchase in self.fetch_market_history_for_item(
+            market_hash_name, acquired_date, session
+        ):
+            if purchase.external_ref == external_ref:
+                return purchase
+        return None
+
+    def _write_accounting_enrichment(
+        self,
+        lot_id: int,
+        source_tx_id: int,
+        quantity: int,
+        purchase: MarketHistoryPurchase,
+        raw_provenance: Optional[str],
+    ) -> AcquisitionResult:
+        """Fill in ``acquisition_fee``/``all_in_cost`` on an existing lot.
+
+        Only the two additive accounting columns are written. Lot identity,
+        ``cost_status``, ``unit_cost``, quantity and ``source_type`` are left
+        exactly as they are, and the stored provenance keeps every key it
+        already had -- the fee breakdown is merged in alongside them.
+        """
+        conn = self.repository.connection
+        qty = Decimal(quantity)
+
+        acquisition_fee = _quantize_money(
+            cents_to_decimal(purchase.paid_fee_cents) / qty
+        )
+        all_in_cost = _quantize_money(
+            cents_to_decimal(purchase.buyer_total_cents) / qty
+        )
+
+        # Merge the fee breakdown into the stored provenance without dropping
+        # any evidence key the earlier phase already recorded.
+        provenance = _deserialize_provenance(raw_provenance)
+        if provenance is None:
+            provenance = Provenance(
+                evidence_type=EvidenceType.STEAM_MARKET_HISTORY,
+                evidence_id=purchase.purchaseid,
+                evidence_data={},
+            )
+
+        evidence_data = dict(provenance.evidence_data or {})
+        evidence_data.update({
+            "paid_amount_cents": purchase.paid_amount_cents,
+            "paid_fee_cents": purchase.paid_fee_cents,
+            "steam_fee_cents": purchase.steam_fee_cents,
+            "publisher_fee_cents": purchase.publisher_fee_cents,
+            "buyer_total_cents": purchase.buyer_total_cents,
+        })
+        merged = Provenance(
+            evidence_type=provenance.evidence_type,
+            evidence_id=provenance.evidence_id or purchase.purchaseid,
+            evidence_data=evidence_data,
+        )
+
+        conn.execute(
+            """
+            UPDATE acquisition_lots
+            SET acquisition_fee = ?,
+                all_in_cost = ?,
+                provenance = ?
+            WHERE id = ?
+            """,
+            (
+                str(acquisition_fee),
+                str(all_in_cost),
+                _serialize_provenance(merged),
+                lot_id,
+            ),
+        )
+
+        return AcquisitionResult(
+            bot_name=self.bot_name,
+            market_hash_name="",
+            quantity=quantity,
+            cost_status=CostStatus.TRACKED,
+            source_type=None,
+            provenance=merged,
+            created=False,
+            lot_id=lot_id,
+            transaction_id=source_tx_id,
+        )
+
     def _update_tracked(
         self,
         lot_id: int,
@@ -928,34 +1151,68 @@ class AcquisitionDetector:
         # Create provenance. Phase 3G records the full fee breakdown so
         # the economic cost basis can be recomputed without re-reading
         # Steam. `paid_amount` is the price-excluding-fees basis.
-        provenance = Provenance(
-            evidence_type=EvidenceType.STEAM_MARKET_HISTORY,
-            evidence_id=purchase.purchaseid,
-            evidence_data={
-                "listingid": purchase.listingid,
-                "paid_amount_cents": purchase.paid_amount_cents,
+        #
+        # The fee keys are only written when Steam actually reported a
+        # fee. `backfill_accounting_from_provenance()` trusts `paid_fee_cents`
+        # as authoritative, so writing a placeholder 0 for a purchase whose
+        # fee was never reported would later be replayed into
+        # acquisition_fee='0.00' -- a fabricated zero fee. Omitting the keys
+        # keeps the evidence honest and leaves those columns NULL.
+        evidence_data = {
+            "listingid": purchase.listingid,
+            "paid_amount_cents": purchase.paid_amount_cents,
+            "currencyid": purchase.currencyid,
+            "timestamp_iso": datetime.fromtimestamp(
+                purchase.time_event_unix, tz=timezone.utc
+            ).isoformat(),
+        }
+        if purchase.fee_evidence_present:
+            evidence_data.update({
                 "paid_fee_cents": purchase.paid_fee_cents,
                 "steam_fee_cents": purchase.steam_fee_cents,
                 "publisher_fee_cents": purchase.publisher_fee_cents,
                 "buyer_total_cents": purchase.buyer_total_cents,
-                "currencyid": purchase.currencyid,
-                "timestamp_iso": datetime.fromtimestamp(
-                    purchase.time_event_unix, tz=timezone.utc
-                ).isoformat(),
-            },
+            })
+
+        provenance = Provenance(
+            evidence_type=EvidenceType.STEAM_MARKET_HISTORY,
+            evidence_id=purchase.purchaseid,
+            evidence_data=evidence_data,
         )
 
         # Update the existing lot
         conn = self.repository.connection
 
-        # unit_cost keeps its Phase 3F meaning (price excluding fees).
-        # acquisition_fee and all_in_cost are additive Phase 3G columns;
-        # they are only written when the migration has been applied.
+        # unit_cost keeps its Phase 3F meaning (price excluding fees) and is
+        # written unconditionally: Steam always reports paid_amount.
+        #
+        # acquisition_fee and all_in_cost are additive Phase 3G columns; they
+        # are only written when the migration has been applied AND Steam
+        # supplied authoritative fee evidence. A fee Steam did not report means
+        # "unknown", not "zero", so those columns stay NULL rather than
+        # recording a fabricated 0.00.
         lot_columns = {
             row[1] for row in conn.execute(
                 "PRAGMA table_info(acquisition_lots)"
             ).fetchall()
         }
+        if purchase.fee_evidence_present:
+            acquisition_fee = str(
+                _quantize_money(
+                    cents_to_decimal(purchase.paid_fee_cents)
+                    / Decimal(purchase.quantity)
+                )
+            )
+            all_in_cost = str(
+                _quantize_money(
+                    cents_to_decimal(purchase.buyer_total_cents)
+                    / Decimal(purchase.quantity)
+                )
+            )
+        else:
+            acquisition_fee = None
+            all_in_cost = None
+
         if {"acquisition_fee", "all_in_cost"} <= lot_columns:
             conn.execute(
                 """
@@ -971,18 +1228,8 @@ class AcquisitionDetector:
                 """,
                 (
                     str(unit_cost),
-                    str(
-                        _quantize_money(
-                            cents_to_decimal(purchase.paid_fee_cents)
-                            / Decimal(purchase.quantity)
-                        )
-                    ),
-                    str(
-                        _quantize_money(
-                            cents_to_decimal(purchase.buyer_total_cents)
-                            / Decimal(purchase.quantity)
-                        )
-                    ),
+                    acquisition_fee,
+                    all_in_cost,
                     SourceType.STEAM_MARKET_PURCHASE.value,
                     purchase.external_ref,
                     _serialize_provenance(provenance),
@@ -1013,25 +1260,47 @@ class AcquisitionDetector:
         # Phase 3G: `fees` now carries the real acquisition fee rather
         # than a hardcoded 0. `unit_price`/`total_value` stay on the
         # price-excluding-fees basis to match `acquisition_lots.unit_cost`.
-        conn.execute(
-            """
-            UPDATE transactions
-            SET unit_price = ?,
-                fees = ?,
-                total_value = ?,
-                timestamp = ?
-            WHERE id = ?
-            """,
-            (
-                str(unit_cost),
-                str(cents_to_decimal(purchase.paid_fee_cents)),
-                str(unit_cost * delta.quantity_change),
-                datetime.fromtimestamp(
-                    purchase.time_event_unix, tz=timezone.utc
-                ).isoformat(),
-                source_tx_id,
-            ),
-        )
+        #
+        # `fees` is only touched when Steam reported the fee. Writing 0
+        # without that evidence would assert a fee Steam never charged;
+        # the existing placeholder is left in place instead.
+        transaction_event_time = datetime.fromtimestamp(
+            purchase.time_event_unix, tz=timezone.utc
+        ).isoformat()
+        if purchase.fee_evidence_present:
+            conn.execute(
+                """
+                UPDATE transactions
+                SET unit_price = ?,
+                    fees = ?,
+                    total_value = ?,
+                    timestamp = ?
+                WHERE id = ?
+                """,
+                (
+                    str(unit_cost),
+                    str(cents_to_decimal(purchase.paid_fee_cents)),
+                    str(unit_cost * delta.quantity_change),
+                    transaction_event_time,
+                    source_tx_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE transactions
+                SET unit_price = ?,
+                    total_value = ?,
+                    timestamp = ?
+                WHERE id = ?
+                """,
+                (
+                    str(unit_cost),
+                    str(unit_cost * delta.quantity_change),
+                    transaction_event_time,
+                    source_tx_id,
+                ),
+            )
 
         return AcquisitionResult(
             bot_name=delta.bot_name,

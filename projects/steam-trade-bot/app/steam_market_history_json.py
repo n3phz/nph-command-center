@@ -83,6 +83,11 @@ class NormalizedEvent:
     received_currencyid: int
     added_tax: int
 
+    # True only when Steam actually supplied a paid_fee field on this
+    # purchase. Distinguishes a genuine zero fee from a field Steam did
+    # not report, so accounting enrichment never writes a fabricated 0.
+    paid_fee_present: bool = False
+
     # V0.5.9 normalization fields
     cost_status: str = "UNKNOWN"
     unit_cost: Optional[int] = None
@@ -474,6 +479,7 @@ def normalize_event(
         currencyid=safe_int(purchase.get("currencyid")),
         received_currencyid=safe_int(purchase.get("received_currencyid")),
         added_tax=safe_int(purchase.get("added_tax")),
+        paid_fee_present=("paid_fee" in purchase),
         asset_appid=meta_appid,
         asset_contextid=meta_contextid,
         asset_id=meta_assetid,

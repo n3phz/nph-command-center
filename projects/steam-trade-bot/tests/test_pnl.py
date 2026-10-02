@@ -83,7 +83,10 @@ def test_current_net_realizable_value():
     pnl = compute_unrealized_pnl(pos, Decimal("12.00"))
 
     assert pnl.current_net_realizable_value == Decimal("22.80")
-    assert pnl.known_cost_basis == Decimal("50.00")
+    # Cost basis is remaining_quantity * unit_cost = 2 * 10.00 = 20.00.
+    # (The previous 50.00 here was copied from the five-unit fixture in
+    # test_known_cost_basis and never matched this two-unit lot.)
+    assert pnl.known_cost_basis == Decimal("20.00")
 
 
 def test_unrealized_pnl_positive():
@@ -218,8 +221,16 @@ def test_none_current_price():
 
 def test_empty_position_raises():
     """Empty position raises ValueError."""
+    # Cannot construct a zero-quantity TRACKED lot (contract requires qty > 0),
+    # so build an empty PositionState directly for this guard test.
+    empty_position = PositionState(
+        market_hash_name="Test Item",
+        quantity_acquired=0,
+        quantity_remaining=0,
+        quantity_unknown_cost=0,
+        known_cost_basis=None,
+        tracked_lot_count=0,
+        unknown_lot_count=0,
+    )
     with pytest.raises(ValueError, match="empty position"):
-        compute_unrealized_pnl(
-            compute_position([make_tracked_lot("Test Item", 0, "10.00")]),
-            Decimal("10.00"),
-        )
+        compute_unrealized_pnl(empty_position, Decimal("10.00"))

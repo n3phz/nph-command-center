@@ -693,6 +693,20 @@ def _run_acquisition_detection(bot_name: str, snapshot_id: int) -> None:
         except Exception as exc:
             logging.warning(f"Delayed evidence reconciliation failed for {bot_name}: {exc}")
 
+        # Phase 3H: enrich already-TRACKED lots with authoritative acquisition fee data.
+        # Lots tracked before Phase 3G carry Phase 3F provenance without fee split.
+        # This pass fills acquisition_fee/all_in_cost in-place for those lots.
+        if session is not None:
+            import logging
+            try:
+                enrichment_results = detector.enrich_tracked_accounting(session)
+                for result in enrichment_results:
+                    logging.info(
+                        f"Enriched accounting fees for TRACKED lot: {bot_name} lot={result.lot_id}"
+                    )
+            except Exception as exc:
+                logging.warning(f"Accounting enrichment failed for {bot_name}: {exc}")
+
     # Log results for observability
     import logging
     for result in results:
