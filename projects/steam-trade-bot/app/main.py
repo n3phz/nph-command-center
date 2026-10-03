@@ -29,6 +29,10 @@ from market_opportunity_discoverer import (
     MarketOpportunityDiscoverer,
 )
 
+from market_inventory_monitor import (
+    InventoryProfitabilityMonitor,
+)
+
 
 # ============================================================
 # CONFIGURATION
@@ -5858,4 +5862,99 @@ def opportunities_discover(
         },
         "classification_counts": classification_counts,
         "candidates": results,
+    }
+
+
+# ============================================================
+# INVENTORY PROFITABILITY MONITOR
+# ============================================================
+
+@app.get("/opportunities/inventory/{bot_name}")
+def inventory_profitability_monitor(
+    bot_name: str,
+    limit: int = 50,
+):
+    """
+    Read-only profitability monitor for tracked inventory.
+
+    Evaluates marketable/tradable tracked items against current
+    Steam Market exit prices to determine unrealized profit/loss.
+
+    This endpoint is READ-ONLY:
+    - No database writes
+    - No Steam Market write operations
+    - No trade execution
+    - No automatic buying or selling
+
+    Args:
+        bot_name: Bot name to monitor.
+        limit: Maximum number of items to evaluate (default 50).
+
+    Returns:
+        JSON response with opportunity results and exclusions.
+    """
+    monitor = InventoryProfitabilityMonitor(
+        db_path=DB_PATH,
+        session=session,
+        request_delay=3.0,
+    )
+
+    result = monitor.monitor_inventory(bot_name=bot_name, limit=limit)
+
+    # Build response
+    opportunities = []
+    for opp in result.opportunities:
+        opportunities.append({
+            "market_hash_name": opp.market_hash_name,
+            "appid": opp.appid,
+            "classid": opp.classid,
+            "quantity": opp.quantity,
+            "bot_name": opp.bot_name,
+            "unit_cost": float(opp.unit_cost) if opp.unit_cost else None,
+            "acquisition_fee": float(opp.acquisition_fee) if opp.acquisition_fee else None,
+            "remaining_all_in_cost": float(opp.remaining_all_in_cost) if opp.remaining_all_in_cost else None,
+            "cost_status": opp.cost_status,
+            "seller_proceeds_per_unit": float(opp.seller_proceeds_per_unit) if opp.seller_proceeds_per_unit else None,
+            "total_seller_proceeds": float(opp.total_seller_proceeds) if opp.total_seller_proceeds else None,
+            "active_listings": opp.active_listings,
+            "liquidity_evidence": opp.liquidity_evidence,
+            "expected_profit": float(opp.expected_profit) if opp.expected_profit else None,
+            "profit_margin": float(opp.profit_margin) if opp.profit_margin else None,
+            "classification": opp.classification.value,
+            "confidence": opp.confidence,
+            "reason": opp.reason,
+            "timestamp": opp.timestamp,
+            "data_sources": opp.data_sources,
+            "is_profitable": opp.is_profitable,
+        })
+
+    exclusions = []
+    for exc in result.exclusions:
+        exclusions.append({
+            "market_hash_name": exc.market_hash_name,
+            "appid": exc.appid,
+            "classid": exc.classid,
+            "reason": exc.reason,
+            "category": exc.category,
+        })
+
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "bot": bot_name,
+        "read_only": True,
+        "execution": {
+            "enabled": False,
+            "mode": "read-only",
+        },
+        "evaluation_timestamp": result.evaluation_timestamp,
+        "total_inventory_items": result.total_inventory_items,
+        "eligible_items": result.eligible_items,
+        "excluded_items": result.excluded_items,
+        "profitable_count": result.profitable_count,
+        "loss_count": result.loss_count,
+        "unverified_count": result.unverified_count,
+        "classification_counts": result.classification_counts,
+        "opportunities": opportunities,
+        "exclusions": exclusions,
     }
