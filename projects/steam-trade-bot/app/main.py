@@ -25,6 +25,10 @@ from market_opportunity_scanner import (
     LiquidityEvidence,
 )
 
+from market_opportunity_discoverer import (
+    MarketOpportunityDiscoverer,
+)
+
 
 # ============================================================
 # CONFIGURATION
@@ -5746,4 +5750,112 @@ def opportunities_scanner(bot_name: str):
         },
         "opportunity_count": len(opportunities),
         "opportunities": opportunities,
+    }
+
+
+# ============================================================
+# MARKET OPPORTUNITY DISCOVERY
+# ============================================================
+
+@app.get("/opportunities/discover")
+def opportunities_discover(
+    limit: int = 25,
+    appids: str | None = None,
+):
+    """
+    Read-only market opportunity discovery endpoint.
+
+    Discovers candidate Steam Market items sorted by lowest price,
+    evaluates them against accounting rules, and returns a shortlist
+    of candidates for MANUAL investigation/purchase.
+
+    This endpoint is READ-ONLY:
+    - No database writes
+    - No Steam Market write operations
+    - No trade execution
+    - No automatic buying or selling
+
+    Args:
+        limit: Maximum number of candidates to return (default 25).
+        appids: Comma-separated list of Steam app IDs to search.
+                Defaults to CS2 (730).
+
+    Returns:
+        JSON response with candidate opportunities sorted by profit.
+    """
+    # Parse appids
+    discovery_appids = [730]  # CS2 default
+    if appids:
+        try:
+            discovery_appids = [int(a.strip()) for a in appids.split(",") if a.strip()]
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "error": "Invalid appids parameter. Use comma-separated integers.",
+                },
+            )
+
+    # Create discoverer
+    discoverer = MarketOpportunityDiscoverer(
+        db_path=DB_PATH,
+        session=session,
+        discovery_appids=discovery_appids,
+        max_candidates=limit,
+    )
+
+    # Discover candidates
+    candidates = discoverer.discover(limit=limit)
+
+    # Build response
+    results = []
+    for c in candidates:
+        results.append({
+            "market_hash_name": c.market_hash_name,
+            "appid": c.appid,
+            "classid": c.classid,
+            "listingid": c.listingid,
+            "seller_proceeds": float(c.seller_proceeds) if c.seller_proceeds else None,
+            "buyer_total": float(c.buyer_total) if c.buyer_total else None,
+            "steam_fee": float(c.steam_fee) if c.steam_fee else None,
+            "publisher_fee": float(c.publisher_fee) if c.publisher_fee else None,
+            "active_listing_count": c.active_listing_count,
+            "acquisition_cost": float(c.acquisition_cost) if c.acquisition_cost else None,
+            "expected_profit": float(c.expected_profit) if c.expected_profit else None,
+            "profit_margin": float(c.profit_margin) if c.profit_margin else None,
+            "liquidity_evidence": c.liquidity_evidence,
+            "identity_verified": c.identity_verified,
+            "classification": c.classification.value,
+            "confidence": c.confidence,
+            "reason": c.reason,
+            "timestamp": c.timestamp,
+            "data_sources": c.data_sources,
+            "is_profitable": c.is_profitable,
+        })
+
+    # Count by classification
+    classification_counts = {}
+    for c in candidates:
+        cls = c.classification.value
+        classification_counts[cls] = classification_counts.get(cls, 0) + 1
+
+    profitable = [c for c in candidates if c.is_profitable]
+
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "read_only": True,
+        "execution": {
+            "enabled": False,
+            "mode": "read-only",
+        },
+        "discovery": {
+            "appids_searched": discovery_appids,
+            "limit": limit,
+            "total_candidates": len(candidates),
+            "profitable_candidates": len(profitable),
+        },
+        "classification_counts": classification_counts,
+        "candidates": results,
     }

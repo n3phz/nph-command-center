@@ -1,0 +1,124 @@
+{
+  "assets": {
+    "753": {
+      "6": {
+        "555": {
+          "amount": "0",
+          "app_icon": "https://shared.fastly.steamstatic.com/community_assets/images/apps/753/1d0167575d746dadea7706685c0f3c01c8aeb6d8.jpg",
+          "appid": 753,
+          "asset_properties": [],
+          "background_color": "",
+          "classid": "3516150099",
+          "commodity": 1,
+          "contextid": "6",
+          "currency": 0,
+          "descriptions": [
+            {
+              "value": "\u201cI can feel her warmth, for her face still burns, a reminder of her sacrifice and ours. The pain, the cold and the burn are our Rules.\u201d"
+            }
+          ],
+          "icon_url": "IzMF03bk9WpSBq-S-ekoE33L-iLqGFHVaU25ZzQNQcXdA3g5gMEPvUZZEfSMJ6dESN8p_2SVTY7V2N4IwHAKmShCIzb02ClCcPcnFMrC2U70p6mZFHG8Sz_FPTPcGBVeFPAPYj3Pp270sriZSm7OEroqFQkMdaEB8mNNNJqKaxpph9MO8mPvkRIkSUFwJsNHKAztyDoDP7pjyi4AIc4Q9n2td8OMiAxhPEVpCbziUr-TZ4fzlyhyDBo1HaceMtqduHHsqpSiOPPUJKo3YfQp78uAkUBPHY3SEGP_",
+          "icon_url_large": "IzMF03bk9WpSBq-S-ekoE33L-iLqGFHVaU25ZzQNQcXdA3g5gMEPvUZZEfSMJ6dESN8p_2SVTY7V2N4IwHAKmShCIzb02ClCcPcnFMrC2U70p6mZFHG8Sz_FPTPcGBVeFPAPYj3Pp270sriZSm7OEroqFQkMdaEB8mNNNJqKaxpph9MO8mPvkRIkSUFwJsNHKAztyDoDP7pjyi4AIc4Q9n2td8OMiAxhPEVpCbziUr-TZ4fzlyhyDBo1HaceMtqduHHsqpSiOPPUJKo3YfQp78uAkUBPHY3SEGP_",
+          "id": "555",
+          "instanceid": "0",
+          "market_bucket_id": "B9999-5",
+          "market_fee_app": 9999,
+          "market_hash_name": "9999-Synthetic Test Card",
+          "market_marketable_restriction": 7,
+          "market_name": "Synthetic Test Card",
+          "market_tradable_restriction": 7,
+          "marketable": 1,
+          "name": "Synthetic Test Card",
+          "original_amount": "1",
+          "owner": 0,
+          "owner_actions": [
+            {
+              "link": "https://steamcommunity.com/my/gamecards/9999/",
+              "name": "View badge progress"
+            },
+            {
+              "link": "javascript:GetGooValue( '%contextid%', '%assetid%', 9999, 5, 0 )",
+              "name": "Turn into Gems..."
+            }
+          ],
+          "sealed": 0,
+          "sealed_type": 0,
+          "status": 4,
+          "tradable": 1,
+          "type": "Blasphemous Trading Card",
+          "unowned_contextid": "6",
+          "unowned_id": "556"
+        }
+      }
+    }
+  },
+  "events": [
+    {
+      "date_event": "1 Oct",
+      "event_type": 4,
+      "listingid": "111111111111111111",
+      "purchaseid": "222222222222222222",
+      "steamid_actor": "76561198000000001",
+      "time_event": 1790841494,
+      "time_event_fraction": 863000000
+    }
+  ],
+  "listings": {
+    "111111111111111111": {
+      "asset": {
+        "amount": "0",
+        "appid": 753,
+        "contextid": "6",
+        "currency": 0,
+        "id": "555"
+      },
+      "currencyid": 2001,
+      "fee": 0,
+      "listingid": "111111111111111111",
+      "original_price": 3,
+      "price": 0,
+      "publisher_fee_app": 9999,
+      "publisher_fee_percent": "0.100000001490116119"
+    }
+  },
+  "pagesize": 10,
+  "purchases": {
+    "111111111111111111_222222222222222222": {
+      "added_tax": 0,
+      "asset": {
+        "amount": "1",
+        "appid": 753,
+        "classid": "3516150099",
+        "contextid": "6",
+        "currency": 0,
+        "id": "556",
+        "instanceid": "0",
+        "new_contextid": "6",
+        "new_id": "556",
+        "status": 4
+      },
+      "currencyid": "2003",
+      "failed": 0,
+      "funds_held": 0,
+      "funds_returned": 0,
+      "funds_revoked": 0,
+      "listingid": "111111111111111111",
+      "needs_rollback": 0,
+      "paid_amount": 3,
+      "paid_fee": 2,
+      "publisher_fee": 1,
+      "publisher_fee_app": 9999,
+      "publisher_fee_percent": "0.100000001490116119",
+      "purchaseid": "222222222222222222",
+      "received_amount": 3,
+      "received_currencyid": "2001",
+      "steam_fee": 1,
+      "steamid_purchaser": "76561198000000001",
+      "time_funds_held_until": 0,
+      "time_sold": 1790841494
+    }
+  },
+  "start": 0,
+  "success": true,
+  "total_count": 1
+}
