@@ -79,6 +79,7 @@ class AcquisitionClassification(str):
     """Classification of an acquisition opportunity."""
     DIRECT_ROUND_TRIP_EDGE = "DIRECT_ROUND_TRIP_EDGE"
     POTENTIAL_RESALE_EDGE = "POTENTIAL_RESALE_EDGE"
+    PRICE_ANOMALY = "PRICE_ANOMALY"
     UNVERIFIED = "UNVERIFIED"
     LOSS = "LOSS"
     BREAK_EVEN = "BREAK_EVEN"
@@ -539,21 +540,29 @@ class MarketAcquisitionScanner:
                 EconomicEvidence.ESTIMATED,
             )
         
-        # Loss
-        if round_trip_profit < 0:
-            return (
-                AcquisitionClassification.LOSS,
-                "HIGH",
-                f"Round-trip loss: -{abs(round_trip_profit):.2f} EUR",
-                EconomicEvidence.AUTHORITATIVE,
-            )
+        # Loss or price anomaly
+        if round_trip_profit <= 0:
+            if round_trip_profit < 0:
+                return (
+                    AcquisitionClassification.LOSS,
+                    "HIGH",
+                    f"Round-trip loss: -{abs(round_trip_profit):.2f} EUR",
+                    EconomicEvidence.AUTHORITATIVE,
+                )
+            else:
+                return (
+                    AcquisitionClassification.BREAK_EVEN,
+                    "MEDIUM",
+                    "Break-even opportunity.",
+                    EconomicEvidence.AUTHORITATIVE,
+                )
         
-        # Break even
-        if round_trip_profit == 0:
+        # Price anomaly: seller proceeds exceed buyer cost (economically impossible)
+        if seller_proceeds > buyer_cost:
             return (
-                AcquisitionClassification.BREAK_EVEN,
-                "MEDIUM",
-                "Break-even opportunity.",
+                AcquisitionClassification.PRICE_ANOMALY,
+                "HIGH",
+                f"Seller proceeds ({seller_proceeds:.2f}) exceed buyer cost ({buyer_cost:.2f}); Steam price fields require independent settlement evidence",
                 EconomicEvidence.AUTHORITATIVE,
             )
         

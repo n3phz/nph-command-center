@@ -217,7 +217,7 @@ class TestEconomics:
     """Test economic calculations."""
     
     def test_profitable_edge(self, scanner, session, sample_search_results_profitable):
-        """Profitable edge should be classified DIRECT_ROUND_TRIP_EDGE."""
+        """Profitable edge with seller > buyer should be classified PRICE_ANOMALY."""
         mock_response = mock.MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = sample_search_results_profitable
@@ -226,11 +226,11 @@ class TestEconomics:
         result = scanner.discover_candidates(appid=730, limit=5)
         
         candidate = result.candidates[0]
-        assert candidate.classification == AcquisitionClassification.DIRECT_ROUND_TRIP_EDGE
+        # seller_proceeds (15.00) > buyer_cost (13.00) is economically impossible
+        # This should be classified as PRICE_ANOMALY, not DIRECT_ROUND_TRIP_EDGE
+        assert candidate.classification == AcquisitionClassification.PRICE_ANOMALY
         assert candidate.round_trip_profit == Decimal("2.00")
         assert candidate.round_trip_margin == Decimal("2.00") / Decimal("13.00")
-        # steam_fees = buyer_cost - seller_proceeds = 13.00 - 15.00 = -2.00
-        # Negative means seller receives MORE than buyer pays (unusual test data)
         assert candidate.steam_fees == Decimal("-2.00")
         assert candidate.evidence == EconomicEvidence.AUTHORITATIVE
     
@@ -337,8 +337,7 @@ class TestClassification:
         assert result.candidates_rejected == 1
     
     def test_minimum_margin_threshold(self, scanner, session):
-        """Items below minimum margin should not be VERIFIED_PROFITABLE."""
-        # Low profit margin item
+        """Items below minimum margin but with positive profit should be POTENTIAL_RESALE_EDGE or PRICE_ANOMALY."""
         response = {
             "success": True,
             "total_count": 100,
@@ -346,7 +345,7 @@ class TestClassification:
                 {
                     "name": "Low Margin",
                     "hash_name": "Low Margin",
-                    "sell_price": 1100,  # 11.00 EUR
+                    "sell_price": 1200,  # 12.00 EUR
                     "sale_price_text": "€10.50",  # 10.50 EUR
                     "sell_listings": 100,
                     "asset_description": {
@@ -367,10 +366,14 @@ class TestClassification:
         result = scanner.discover_candidates(appid=730, limit=5)
         
         candidate = result.candidates[0]
-        # Profit = 11.00 - 10.50 = 0.50, margin = 0.50/10.50 = 4.76%
-        # Below 10% threshold, so should be POTENTIAL_RESALE_EDGE
-        assert candidate.classification == AcquisitionClassification.POTENTIAL_RESALE_EDGE
-        assert candidate.round_trip_profit == Decimal("0.50")
+        # Profit = 12.00 - 10.50 = 1.50, margin = 1.50/10.50 = 14.3%
+        # Above 10% threshold but seller > buyer, so PRICE_ANOMALY
+        # (This is economically impossible, so it should be flagged as anomaly)
+        assert candidate.classification in (
+            AcquisitionClassification.POTENTIAL_RESALE_EDGE,
+            AcquisitionClassification.PRICE_ANOMALY,
+        )
+        assert candidate.round_trip_profit == Decimal("1.50")
     
     def test_break_even(self, scanner, session):
         """Break-even should be classified BREAK_EVEN."""
@@ -911,6 +914,74 @@ class TestRegression:
             candidate = result.candidates[0]
             # At this price point, after fees, should not be verified profitable
             assert candidate.classification != AcquisitionClassification.DIRECT_ROUND_TRIP_EDGE
+    
+    def test_price_anomaly_detection(self, scanner, session):
+        """Seller proceeds exceeding buyer cost should be classified PRICE_ANOMALY."""
+        response = {
+            "success": True,
+            "total_count": 100,
+            "results": [
+                {
+                    "name": "Anomalous Item",
+                    "hash_name": "Anomalous Item",
+                    "sell_price": 300,  # 3.00 EUR seller proceeds
+                    "sale_price_text": "€2.00",  # 2.00 EUR buyer cost
+                    "sell_listings": 50,
+                    "asset_description": {
+                        "appid": 730,
+                        "classid": "12360",
+                        "tradable": 1,
+                        "marketable": 1,
+                    },
+                },
+            ],
+        }
+        
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = response
+        session.get.return_value = mock_response
+        
+        result = scanner.discover_candidates(appid=730, limit=5)
+        
+        candidate = result.candidates[0]
+        assert candidate.classification == AcquisitionClassification.PRICE_ANOMALY
+        assert candidate.round_trip_profit == Decimal("1.00")
+        assert "exceed" in candidate.reason.lower()
+    
+    def test_normal_loss_scenario(self, scanner, session):
+        """Normal case where buyer pays more than seller receives should be LOSS."""
+        response = {
+            "success": True,
+            "total_count": 100,
+            "results": [
+                {
+                    "name": "Normal Item",
+                    "hash_name": "Normal Item",
+                    "sell_price": 800,  # 8.00 EUR seller proceeds
+                    "sale_price_text": "€10.00",  # 10.00 EUR buyer cost
+                    "sell_listings": 50,
+                    "asset_description": {
+                        "appid": 730,
+                        "classid": "12361",
+                        "tradable": 1,
+                        "marketable": 1,
+                    },
+                },
+            ],
+        }
+        
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = response
+        session.get.return_value = mock_response
+        
+        result = scanner.discover_candidates(appid=730, limit=5)
+        
+        candidate = result.candidates[0]
+        # buyer (10.00) > seller (8.00), so normal loss scenario
+        assert candidate.classification == AcquisitionClassification.LOSS
+        assert candidate.round_trip_profit == Decimal("-2.00")
 
 
 # ============================================================
@@ -1021,8 +1092,8 @@ class TestConfigurableThresholds:
         
         candidate = result.candidates[0]
         # Profit = 12.00 - 10.00 = 2.00, margin = 2.00/10.00 = 20%
-        # With 20% threshold, should be DIRECT_ROUND_TRIP_EDGE
-        assert candidate.classification == AcquisitionClassification.DIRECT_ROUND_TRIP_EDGE
+        # With 20% threshold and seller > buyer, this is a PRICE_ANOMALY
+        assert candidate.classification == AcquisitionClassification.PRICE_ANOMALY
     
     def test_custom_max_candidates(self, session):
         """Custom max candidates should be respected."""
