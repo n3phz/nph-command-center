@@ -33,6 +33,11 @@ from market_inventory_monitor import (
     InventoryProfitabilityMonitor,
 )
 
+from market_acquisition_scanner import (
+    MarketAcquisitionScanner,
+    create_scanner,
+)
+
 
 # ============================================================
 # CONFIGURATION
@@ -5957,4 +5962,105 @@ def inventory_profitability_monitor(
         "classification_counts": result.classification_counts,
         "opportunities": opportunities,
         "exclusions": exclusions,
+    }
+
+
+# ============================================================
+# ACQUISITION OPPORTUNITY SCANNER (Phase 6A)
+# ============================================================
+
+@app.get("/opportunities/acquisition")
+def acquisition_opportunity_scanner(
+    appid: int = 730,
+    limit: int = 25,
+    min_price: float = 0.01,
+    max_price: float = 1000.0,
+    min_listings: int = 2,
+):
+    """
+    Read-only acquisition opportunity scanner.
+
+    Discovers Steam Market items and evaluates whether buying now
+    at current buyer-facing prices could produce a profitable round-trip
+    compared to seller proceeds.
+
+    This endpoint is READ-ONLY:
+    - No database writes
+    - No Steam Market write operations
+    - No trade execution
+    - No automatic buying or selling
+
+    Args:
+        appid: Steam app ID to search (default: 730 for CS2)
+        limit: Maximum candidates to evaluate (default: 25)
+        min_price: Minimum buyer price in EUR (default: 0.01)
+        max_price: Maximum buyer price in EUR (default: 1000.0)
+        min_listings: Minimum active listings for liquidity (default: 2)
+
+    Returns:
+        JSON response with acquisition candidates and classifications.
+    """
+    from decimal import Decimal
+
+    scanner = create_scanner(
+        session=session,
+        request_delay=3.0,
+        max_candidates=limit,
+        min_price=Decimal(str(min_price)),
+        max_price=Decimal(str(max_price)),
+        min_listings=min_listings,
+    )
+
+    result = scanner.discover_candidates(
+        appid=appid,
+        limit=limit,
+        min_price=Decimal(str(min_price)),
+        max_price=Decimal(str(max_price)),
+        min_listings=min_listings,
+    )
+
+    # Build response
+    candidates = []
+    for c in result.candidates:
+        candidates.append({
+            "market_hash_name": c.market_hash_name,
+            "appid": c.appid,
+            "classid": c.classid,
+            "buyer_acquisition_cost": float(c.buyer_acquisition_cost) if c.buyer_acquisition_cost else None,
+            "buyer_acquisition_source": c.buyer_acquisition_source.value,
+            "seller_proceeds_per_unit": float(c.seller_proceeds_per_unit) if c.seller_proceeds_per_unit else None,
+            "seller_proceeds_source": c.seller_proceeds_source.value,
+            "round_trip_profit": float(c.round_trip_profit) if c.round_trip_profit else None,
+            "round_trip_margin": float(c.round_trip_margin) if c.round_trip_margin else None,
+            "steam_fees": float(c.steam_fees) if c.steam_fees else None,
+            "steam_fee_percentage": float(c.steam_fee_percentage) if c.steam_fee_percentage else None,
+            "active_listings": c.active_listings,
+            "liquidity_evidence": c.liquidity_evidence,
+            "classification": c.classification.value,
+            "confidence": c.confidence,
+            "reason": c.reason,
+            "evidence": c.evidence,
+            "timestamp": c.timestamp,
+            "data_sources": c.data_sources,
+            "is_profitable": c.is_profitable,
+        })
+
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "read_only": True,
+        "execution": {
+            "enabled": False,
+            "mode": "read-only",
+        },
+        "evaluation_timestamp": result.timestamp,
+        "search_params": result.search_params,
+        "candidates_evaluated": result.candidates_evaluated,
+        "candidates_accepted": result.candidates_accepted,
+        "candidates_rejected": result.candidates_rejected,
+        "rate_limited": result.rate_limited,
+        "profitable_count": result.profitable_count,
+        "verified_count": result.verified_count,
+        "classification_counts": result.classification_counts,
+        "candidates": candidates,
     }
